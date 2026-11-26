@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cloudrunner — alpine ring-run flight game</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #f7c489; font-family: "Segoe UI", system-ui, sans-serif; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .hidden { display: none !important; }
+  #hud-root { position: fixed; inset: 0; pointer-events: none; color: #fff; }
+  #hud-root button { pointer-events: auto; }
+
+  /* --- HUD top strip: lit instrument boxes --- */
+  .hud-top { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; }
+  .hud-box { background: rgba(10, 18, 28, 0.72); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 8px;
+    padding: 6px 12px; text-align: center; min-width: 92px; box-shadow: 0 0 14px rgba(0, 0, 0, 0.35); }
+  .hud-box label { display: block; font-size: 10px; letter-spacing: 2px; color: #9fd8ef; }
+  .hud-box b { font-size: 24px; font-variant-numeric: tabular-nums; color: #ffe9a8; text-shadow: 0 0 8px rgba(255, 210, 90, 0.7); }
+  .hud-box span { font-size: 11px; color: #cfe8f5; margin-left: 3px; }
+
+  /* --- HUD left column: gauges and artificial horizon --- */
+  .hud-left { position: absolute; left: 14px; top: 96px; display: flex; flex-direction: column; gap: 12px; width: 190px; }
+  .hud-gauge { background: rgba(10, 18, 28, 0.72); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 8px; padding: 8px 10px; }
+  .hud-gauge label { font-size: 10px; letter-spacing: 2px; color: #9fd8ef; }
+  .hud-gauge b { float: right; font-size: 14px; color: #ffe9a8; }
+  .gauge-track { height: 10px; background: rgba(255, 255, 255, 0.14); border-radius: 5px; margin-top: 5px; overflow: hidden; }
+  .gauge-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #37b6ff, #7ee0a3); border-radius: 5px; transition: width 0.1s linear; }
+  .gauge-fill.fuel { background: linear-gradient(90deg, #ffb02e, #ffe9a8); }
+  .gauge-fill.fuel.low { background: linear-gradient(90deg, #ff3b30, #ff7a5c); }
+  .gauge-fill.damage { background: linear-gradient(90deg, #ff7a5c, #ff3b30); }
+  .hud-horizon { position: relative; width: 190px; height: 110px; border-radius: 8px; overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.25); background: #2b6cb0; }
+  .horizon-inner { position: absolute; left: -50%; top: -100%; width: 200%; height: 300%;
+    transform: translateY(var(--pitch, 0px)) rotate(var(--bank, 0rad)); }
+  .horizon-sky { position: absolute; left: 0; top: 0; width: 100%; height: 50%; background: linear-gradient(#6db3f2, #a8d4f5); }
+  .horizon-ground { position: absolute; left: 0; top: 50%; width: 100%; height: 50%; background: linear-gradient(#8a6b46, #5d7a3a); }
+  .horizon-line { position: absolute; left: 0; right: 0; top: 50%; height: 2px; background: #fff; }
+  .horizon-plane { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 22px; color: #ffe9a8; text-shadow: 0 0 6px #000; }
+
+  /* --- Off-screen ring arrow and banners --- */
+  .hud-arrow { position: absolute; left: 50%; top: 50%; font-size: 34px; color: #ffc21a; text-shadow: 0 0 10px rgba(0,0,0,0.7); display: none; }
+  .hud-banner { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); font-size: 34px; font-weight: 800;
+    letter-spacing: 2px; color: #ffe9a8; text-shadow: 0 2px 12px rgba(0,0,0,0.65); opacity: 0; transition: opacity 0.2s; white-space: nowrap; }
+  .hud-banner.show { opacity: 1; }
+  .hud-banner.warn { color: #ff8a7a; }
+  .hud-banner.info { color: #cfe8f5; font-size: 26px; }
+
+  /* --- Full screens: title / paused / over --- */
+  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; background: linear-gradient(rgba(20, 30, 50, 0.25), rgba(20, 30, 50, 0.62)); color: #fff; }
+  .screen h1 { font-size: 64px; margin: 0; letter-spacing: 10px; color: #ffe9a8; text-shadow: 0 4px 24px rgba(0,0,0,0.6); }
+  .tagline { font-size: 18px; color: #eaf4fb; margin: 6px 0 22px; }
+  .mission { max-width: 560px; background: rgba(10, 18, 28, 0.72); border: 1px solid rgba(255,255,255,0.25); border-radius: 10px; padding: 14px 20px; }
+  .mission b { color: #ffc21a; letter-spacing: 2px; }
+  .mission p { margin: 8px 0 0; line-height: 1.5; font-size: 15px; }
+  .controls { margin-top: 18px; font-size: 14px; line-height: 1.9; color: #dfeef8; }
+  .controls b { color: #ffe9a8; }
+  .press { margin-top: 22px; font-size: 20px; animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+  .best { color: #9fd8ef; font-size: 14px; }
+  .results { display: flex; gap: 14px; margin: 18px 0 26px; }
+  .results div { background: rgba(10, 18, 28, 0.72); border: 1px solid rgba(255,255,255,0.25); border-radius: 8px; padding: 10px 18px; min-width: 90px; }
+  .results label { display: block; font-size: 10px; letter-spacing: 2px; color: #9fd8ef; }
+  .results b { font-size: 26px; color: #ffe9a8; }
+  #btn-again { pointer-events: auto; font-size: 20px; font-weight: 700; letter-spacing: 2px; color: #14202e;
+    background: #ffc21a; border: none; border-radius: 10px; padding: 14px 34px; cursor: pointer; box-shadow: 0 4px 18px rgba(0,0,0,0.4); }
+  #btn-again:hover { background: #ffd34d; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/three.module.min.js" } }
+</script>
+</head>
+<body>
+<canvas id="game" aria-label="Cloudrunner: fly the stunt plane through the rings and land on the runway"></canvas>
+<div id="hud-root"></div>
+<p id="status" role="status" aria-live="polite"></p>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
