@@ -16,6 +16,14 @@ import { createAudio } from './audio.js';
 import { createRings } from './rings.js';
 import { stageShot } from './shots.js';
 import { missionById, MISSION_ORDER, SETTING } from './missions.js';
+import { STORM_TUNING } from './config.js';
+import {
+  createWeather, updateWeather, windVector, windKnots, windCompass,
+  createWindSock, updateWindSock, createRain, updateRain, setRainVisible,
+  createStormClouds, updateStormClouds, createLightning, updateLightning,
+} from './weather.js';
+import { recordFlight, loadLog, clearLog, logSummary, recentFlights } from './log.js';
+import { planeById } from './planes.js';
 
 const BEST_KEY = 'cloudrunner-best';
 const MAX_FRAME = 0.25;
@@ -25,6 +33,8 @@ const shot = params.get('shot');
 const seed = pickSeed(params.get('seed'));
 const shotMission = missionById(params.get('mission')).id;
 let selectedMission = shot ? shotMission : missionById(params.get('mission')).id;
+let selectedPlane = 'kestrel';
+let weather = createWeather(seed, selectedMission);
 
 const canvas = document.getElementById('game');
 const hudRoot = document.getElementById('hud-root');
@@ -77,13 +87,38 @@ sunDisc.position.set(-1800, 420, 1200);
 sunDisc.lookAt(0, 0, 0);
 scene.add(sunDisc);
 
+// --- Weather dressing ------------------------------------------------------
+// A windsock by the runway that reads the live wind, rain that falls only
+// in the Storm Run, and a low dark storm layer that rides the wind.
+const windSock = createWindSock();
+windSock.group.position.set(46, 2, -150);
+scene.add(windSock.group);
+const rain = createRain();
+scene.add(rain.points);
+const stormClouds = createStormClouds(seed);
+scene.add(stormClouds.group);
+const lightning = createLightning(seed);
+
+function applyWeatherVisuals() {
+  setRainVisible(rain, weather.storm);
+  stormClouds.group.visible = weather.storm;
+}
+applyWeatherVisuals();
+
 // --- World -----------------------------------------------------------------
 const terrain = createTerrain(seed);
 scene.add(terrain.group);
 const ringsMod = createRings(seed);
 scene.add(ringsMod.group);
-const aircraft = createAircraft();
+let aircraft = createAircraft(selectedPlane);
 scene.add(aircraft.group);
+
+// Swap the hangar choice: pull the old plane out, put the new one in.
+function swapPlane(planeId) {
+  scene.remove(aircraft.group);
+  aircraft = createAircraft(planeId);
+  scene.add(aircraft.group);
+}
 
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.5, 7000);
 camera.position.set(0, 12, 200);
@@ -91,7 +126,7 @@ camera.position.set(0, 12, 200);
 const hud = createHud(hudRoot);
 const audio = createAudio();
 
-let state = createFlightState(selectedMission);
+let state = createFlightState(selectedMission, selectedPlane);
 let screen = 'title';
 let best = readBest();
 hud.setBest(best);
@@ -144,6 +179,8 @@ function overData() {
     if (state.mission === 'cargo') reason += ` ${state.cratesDropped} of 3 crates dropped.`;
     if (state.mission === 'rescue') reason += state.rescued ? ' Hiker aboard, safe home.' : ' The hiker is still waiting at the hut.';
     if (state.mission === 'sprint' && state.timeBonus > 0) reason += ` Beat the par by ${Math.round(state.timeBonus / 5)}s: +${state.timeBonus} time bonus.`;
+    if (state.mission === 'storm' && state.timeBonus > 0) reason += ` Beat the storm par by ${Math.round(state.timeBonus / 6)}s: +${state.timeBonus} time bonus.`;
+    if (state.mission === 'storm') reason += ' Flown through the storm — gusts, rain and all.';
     if (state.damage >= 60) reason += ' The airframe needs work after that one.';
   } else {
     reason = state.crashReason || 'The sortie is over.';
@@ -207,6 +244,17 @@ function ringInfo() {
 
 function renderFrame(dt) {
   updateClouds(terrain.clouds, dt);
+  updateWindSock(windSock, weather);
+  if (weather.storm) {
+    updateRain(rain, state.position, dt);
+    updateStormClouds(stormClouds, weather, dt);
+    updateLightning(lightning, dt, true);
+  } else {
+    updateLightning(lightning, dt, false);
+  }
+  state.lightningFlash = lightning.flash;
+  // The wind gauge reads the live weather, straight off the flight state.
+  state.wind = { knots: windKnots(weather), dir: windCompass(weather).label };
   ringsMod.update(state.ringsPassed, state.time);
   poseAircraft(aircraft, state, dt);
   updateCamera(dt);
@@ -217,7 +265,9 @@ function renderFrame(dt) {
 
 // --- Game flow ---------------------------------------------------------------
 function resetWorld(mission = selectedMission) {
-  state = createFlightState(mission);
+  state = createFlightState(mission, selectedPlane);
+  weather = createWeather(seed, mission);
+  applyWeatherVisuals();
   ringsMod.rings.forEach((ring) => { ring.passed = false; });
   clearCrates();
   camTarget.set(0, 12, 200);
@@ -238,6 +288,17 @@ function endGame() {
     best = state.score;
     saveBest(best);
   }
+  // The Pilot Log remembers every sortie, win or wreck.
+  recordFlight({
+    mission: state.mission,
+    plane: state.plane,
+    score: state.score,
+    time: state.time,
+    rings: state.ringsPassed,
+    landed: state.landed,
+    crashed: state.crashed,
+    damage: state.damage,
+  });
   hud.showScreen('over', overData());
   hud.setBest(best);
   announce(state.landed ? `Mission complete. Score ${state.score}.` : `Crashed. ${state.crashReason} Score ${state.score}.`);
@@ -254,7 +315,8 @@ const game = {
     hud.showScreen('playing');
   },
   step(ctl, dt) {
-    const events = stepFlight(state, ctl, { rings: ringsMod.rings, mission: state.mission }, dt);
+    updateWeather(weather, dt);
+    const events = stepFlight(state, ctl, { rings: ringsMod.rings, mission: state.mission, wind: windVector(weather) }, dt);
     if (events & EVENT_RING) {
       hud.showBanner(`RING ${state.ringsPassed}! +${RINGS.points}`, 'ring');
       audio.ringChime();
@@ -306,6 +368,10 @@ const game = {
       state.timeBonus = 150;
       state.score += 150;
     }
+    if (state.mission === 'storm') {
+      state.timeBonus = 120;
+      state.score += 120;
+    }
     state.score += RINGS.landingBonus;
     state.landed = true;
     state.landedClean = true;
@@ -354,13 +420,20 @@ function runGame() {
   hud.showScreen('title');
   hud.setBest(best);
   hud.setMission(selectedMission);
+  hud.setPlane(selectedPlane);
   announce(`Cloudrunner over ${SETTING.valley}. Pick a sortie, press Enter to fly.`);
+
+  // The Pilot Log is an overlay on the title screen: Enter closes it
+  // instead of starting a sortie while it is open.
+  let logOpen = false;
 
   function handleActions() {
     const actions = input.takeActions();
     const picked = input.takeMissionSelect();
     if (picked >= 0 && screen === 'title') {
       selectedMission = MISSION_ORDER[picked];
+      weather = createWeather(seed, selectedMission);
+      applyWeatherVisuals();
       hud.setMission(selectedMission);
     }
     if (actions & ACTION_DROP) dropQueued = true;
@@ -368,7 +441,10 @@ function runGame() {
       const muted = audio.toggleMute();
       hud.showBanner(muted ? 'SOUND OFF' : 'SOUND ON', '');
     }
-    if (actions & ACTION_RESTART && screen !== 'title') startGame();
+    if (actions & ACTION_CONFIRM && logOpen) {
+      logOpen = false;
+      hud.showScreen('title');
+    } else if (actions & ACTION_RESTART && screen !== 'title') startGame();
     else if (actions & ACTION_CONFIRM && (screen === 'title' || screen === 'over')) startGame();
     else if (actions & ACTION_PAUSE && screen === 'playing') {
       screen = 'paused';
@@ -390,7 +466,8 @@ function runGame() {
     }
     const ctl = { ...input.controls(STEP), drop: dropQueued };
     dropQueued = false;
-    const events = stepFlight(state, ctl, { rings: ringsMod.rings, mission: state.mission }, STEP);
+    updateWeather(weather, STEP);
+    const events = stepFlight(state, ctl, { rings: ringsMod.rings, mission: state.mission, wind: windVector(weather) }, STEP);
     if (events & EVENT_TAKEOFF) {
       hud.showBanner(`AIRBORNE — ${missionById(state.mission).short}`, 'info');
       announce('Airborne.');
@@ -460,7 +537,41 @@ function runGame() {
   hudRoot.addEventListener('missionpick', (event) => {
     if (screen === 'title') {
       selectedMission = missionById(event.detail).id;
+      weather = createWeather(seed, selectedMission);
+      applyWeatherVisuals();
       hud.setMission(selectedMission);
+    }
+  });
+
+  hudRoot.addEventListener('planepick', (event) => {
+    if (screen === 'title') {
+      selectedPlane = planeById(event.detail).id;
+      swapPlane(selectedPlane);
+      hud.setPlane(selectedPlane);
+      announce(`Flying the ${planeById(selectedPlane).name}.`);
+    }
+  });
+
+  hudRoot.addEventListener('logopen', () => {
+    if (screen === 'title') {
+      logOpen = true;
+      const log = loadLog();
+      hud.showScreen('log', null, { summary: logSummary(log), recent: recentFlights(log) });
+      announce('Pilot Log open.');
+    }
+  });
+
+  hudRoot.addEventListener('logclear', () => {
+    clearLog();
+    const log = loadLog();
+    hud.showScreen('log', null, { summary: logSummary(log), recent: recentFlights(log) });
+    announce('Pilot Log cleared.');
+  });
+
+  hudRoot.addEventListener('logback', () => {
+    if (screen === 'title') {
+      logOpen = false;
+      hud.showScreen('title');
     }
   });
 

@@ -1,11 +1,15 @@
 // Cloudrunner — aircraft: a low-poly stunt plane built from primitives.
 // One job: build the plane mesh, pose it from the flight state, spin the prop.
+// The hangar picks the plane: the Kestrel flies red with a short wing, the
+// Albatross blue with a longer one — the paint and the span are the plane.
 import * as THREE from 'three';
+import { planeById } from './planes.js';
 
-export function createAircraft() {
+export function createAircraft(planeId = 'kestrel') {
+  const plane = planeById(planeId);
   const group = new THREE.Group();
-  const paint = new THREE.MeshLambertMaterial({ color: 0xe23b2e, flatShading: true });
-  const cream = new THREE.MeshLambertMaterial({ color: 0xf5ead2, flatShading: true });
+  const paint = new THREE.MeshLambertMaterial({ color: plane.paint, flatShading: true });
+  const cream = new THREE.MeshLambertMaterial({ color: plane.accent, flatShading: true });
   const dark = new THREE.MeshLambertMaterial({ color: 0x2b2f36, flatShading: true });
   const glass = new THREE.MeshLambertMaterial({ color: 0x9fd8ef, flatShading: true });
 
@@ -28,13 +32,14 @@ export function createAircraft() {
   canopy.position.set(0, 0.72, -0.6);
   group.add(canopy);
 
-  // Main wing (low wing) and tailplane, with cream tips.
-  const wing = new THREE.Mesh(new THREE.BoxGeometry(9.2, 0.16, 1.7), paint);
+  // Main wing (low wing) and tailplane, with cream tips. The Albatross
+  // carries a longer wing than the Kestrel — it shows in the silhouette.
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(plane.wingSpan, 0.16, 1.7), paint);
   wing.position.set(0, -0.15, -0.4);
   group.add(wing);
   for (const side of [-1, 1]) {
     const tip = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.18, 1.7), cream);
-    tip.position.set(side * 4.35, -0.15, -0.4);
+    tip.position.set(side * (plane.wingSpan / 2 - 0.35), -0.15, -0.4);
     group.add(tip);
   }
   const tailplane = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.12, 1.1), cream);
@@ -77,12 +82,12 @@ export function createAircraft() {
   prop.position.z = 0;
   group.add(prop);
 
-  // Navigation lights: red left, green right, white tail.
+  // Navigation lights: red left, green right, white tail — on the wingtips.
   const lightMat = (color) => new THREE.MeshBasicMaterial({ color });
   const leftLight = new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 6), lightMat(0xff2222));
-  leftLight.position.set(-4.6, -0.15, -0.4);
+  leftLight.position.set(-plane.wingSpan / 2, -0.15, -0.4);
   const rightLight = new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 6), lightMat(0x22ff66));
-  rightLight.position.set(4.6, -0.15, -0.4);
+  rightLight.position.set(plane.wingSpan / 2, -0.15, -0.4);
   const tailLight = new THREE.Mesh(new THREE.SphereGeometry(0.1, 6, 6), lightMat(0xffffff));
   tailLight.position.set(0, 0.3, 4.55);
   group.add(leftLight, rightLight, tailLight);

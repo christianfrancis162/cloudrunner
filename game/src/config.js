@@ -42,6 +42,20 @@ export const MISSION_TUNING = {
   dropCooldown: 1.5, // seconds between crate drops
 };
 
+// Weather: a calm valley breeze most days; the Storm Run is another valley.
+export const CALM_WIND = {
+  base: 4, // m/s steady breeze
+  gustAmp: 3, // m/s gust swing
+};
+
+export const STORM_TUNING = {
+  par: 120, // seconds: Storm Run par time; each second under pays +6
+  bonusPerSecond: 6,
+  windBase: 14, // m/s steady storm wind
+  gustAmp: 9, // m/s gust swing in the storm
+  rain: true,
+};
+
 export const RINGS = {
   count: 8,
   radius: 11,

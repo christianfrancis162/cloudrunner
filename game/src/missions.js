@@ -1,4 +1,4 @@
-// Cloudrunner — missions: the four sorties flown over Kestrel Valley.
+// Cloudrunner — missions: the five sorties flown over Kestrel Valley.
 // One job: name each mission, its goal and its scoring, and place the
 // mission targets (cargo drop zones, the rescue pad) in the world.
 // The setting is one coherent place: Kestrel Valley, a golden-hour alpine
@@ -70,9 +70,19 @@ export const MISSIONS = {
     parTime: 150,
     crates: 0,
   },
+  storm: {
+    id: 'storm',
+    name: 'Storm Run',
+    short: 'STORM RUN',
+    tagline: 'Fly the ring course through a valley storm — 14 m/s gusts, low cloud and rain. Beat the 2:00 par.',
+    objective: 'Fly all 8 rings in the storm inside the 2:00 par, then land.',
+    parTime: 120,
+    crates: 0,
+    storm: true,
+  },
 };
 
-export const MISSION_ORDER = ['ring-run', 'cargo', 'rescue', 'sprint'];
+export const MISSION_ORDER = ['ring-run', 'cargo', 'rescue', 'sprint', 'storm'];
 
 export function missionById(id) {
   return MISSIONS[id] ?? MISSIONS['ring-run'];

@@ -29,6 +29,7 @@ const KEYMAP = {
   Digit2: 'mission2',
   Digit3: 'mission3',
   Digit4: 'mission4',
+  Digit5: 'mission5',
 };
 
 export function createInput(canvas) {

@@ -8,9 +8,10 @@
 // and at 100 the airframe gives out. A smooth pilot keeps a clean plane;
 // a rough one flies a wounded one home — or doesn't make it home at all.
 import * as THREE from 'three';
-import { PLANE, RINGS, WORLD, MISSION_TUNING } from './config.js';
+import { PLANE, RINGS, WORLD, MISSION_TUNING, STORM_TUNING } from './config.js';
 import { groundHeight, RUNWAY } from './terrain.js';
 import { DROP_ZONES, RESCUE_PAD, dropScore } from './missions.js';
+import { planeTuning } from './planes.js';
 
 export const EVENT_NONE = 0;
 export const EVENT_RING = 1 << 0;
@@ -23,9 +24,15 @@ export const EVENT_PICKUP = 1 << 6;
 export const EVENT_DAMAGE = 1 << 7;
 
 // Fresh flight state: parked at the south end of the runway, facing north.
-export function createFlightState(mission = 'ring-run') {
+// The plane matters: the Kestrel is nimble and thirsty, the Albatross
+// steady and long-legged — its tuning rides in state.tuning and the flight
+// model reads it, so the same stick flies two different aeroplanes.
+export function createFlightState(mission = 'ring-run', planeId = 'kestrel') {
+  const tuning = planeTuning(planeId);
   return {
     mission,
+    plane: planeId,
+    tuning,
     position: RUNWAY.start.clone(),
     heading: RUNWAY.heading,
     pitch: 0,
@@ -33,7 +40,7 @@ export function createFlightState(mission = 'ring-run') {
     speed: 0,
     throttle: 0,
     verticalSpeed: 0,
-    fuel: PLANE.fuelCapacity,
+    fuel: tuning.fuelCapacity,
     damage: 0,
     engineOn: true,
     airborne: false,
@@ -80,10 +87,12 @@ function addDamage(state, amount, events) {
 }
 
 // Advance the flight state by dt seconds. `ctl` is {pitch, roll,
-// throttleDelta, airbrake, drop} from input. `ctx` is {rings, mission}.
+// throttleDelta, airbrake, drop} from input. `ctx` is {rings, mission,
+// wind} — wind is the weather's {x, z} vector in m/s, or null in calm air.
 // Returns a bitmask of EVENT_* flags.
 export function stepFlight(state, ctl, ctx, dt) {
   const rings = ctx.rings;
+  const T = state.tuning || PLANE; // this sortie's plane: Kestrel or Albatross
   let events = EVENT_NONE;
   if (state.crashed || state.landed) return events;
   state.time += dt;
@@ -100,7 +109,7 @@ export function stepFlight(state, ctl, ctx, dt) {
 
   // Fuel burn scales with throttle, and a damaged airframe burns more.
   if (state.engineOn) {
-    const burn = PLANE.fuelBurn * state.throttle * (1 + state.damage / 150);
+    const burn = T.fuelBurn * state.throttle * (1 + state.damage / 150);
     state.fuel = Math.max(0, state.fuel - burn * dt);
     if (state.fuel < 20 && !state.lowFuelWarned) {
       state.lowFuelWarned = true;
@@ -111,9 +120,9 @@ export function stepFlight(state, ctl, ctx, dt) {
   // Speed: thrust minus drag, airbrake sheds speed fast. Damage caps the
   // top speed, so a battered plane cannot outrun its own fuel gauge.
   const handling = handlingFactor(state.damage);
-  const topSpeed = PLANE.maxSpeed * (1 - (state.damage / 100) * PLANE.damageSpeedLoss);
-  const thrust = state.engineOn ? PLANE.accel * state.throttle * (0.7 + 0.3 * handling) : 0;
-  const drag = PLANE.drag * state.speed * state.speed + (ctl.airbrake ? 22 : 0);
+  const topSpeed = T.maxSpeed * (1 - (state.damage / 100) * PLANE.damageSpeedLoss);
+  const thrust = state.engineOn ? T.accel * state.throttle * (0.7 + 0.3 * handling) : 0;
+  const drag = T.drag * state.speed * state.speed + (ctl.airbrake ? 22 : 0);
   state.speed = Math.max(0, state.speed + (thrust - drag) * dt);
   state.speed = Math.min(state.speed, topSpeed);
 
@@ -121,14 +130,14 @@ export function stepFlight(state, ctl, ctx, dt) {
   // Damage makes the controls heavy — the stick answers slower.
   const onGround = !state.airborne;
   const pitchAuthority = onGround ? 0.25 : handling;
-  state.pitch = clamp(state.pitch + ctl.pitch * PLANE.pitchRate * pitchAuthority * dt, -0.6, 0.6);
-  state.bank = clamp(state.bank + ctl.roll * PLANE.rollRate * handling * dt, -PLANE.maxBank, PLANE.maxBank);
+  state.pitch = clamp(state.pitch + ctl.pitch * T.pitchRate * pitchAuthority * dt, -0.6, 0.6);
+  state.bank = clamp(state.bank + ctl.roll * T.rollRate * handling * dt, -T.maxBank, T.maxBank);
   // Bank bleeds back toward level when the stick is centred.
   if (Math.abs(ctl.roll) < 0.05) state.bank *= Math.max(0, 1 - 1.4 * dt);
-  state.heading += PLANE.yawFromBank * Math.sin(state.bank) * dt * (state.speed / 40 + 0.3);
+  state.heading += T.yawFromBank * Math.sin(state.bank) * dt * (state.speed / 40 + 0.3);
 
   // Stall: below min speed the wing gives up and the nose drops.
-  const stalled = state.airborne && state.speed < PLANE.minSpeed;
+  const stalled = state.airborne && state.speed < T.minSpeed;
   if (stalled) state.pitch = Math.max(state.pitch - 0.55 * dt, -0.6);
 
   // Velocity: forward along the nose, plus a little sink when stalled.
@@ -138,6 +147,19 @@ export function stepFlight(state, ctl, ctx, dt) {
   if (stalled) vel.y -= 6;
   state.verticalSpeed = vel.y;
   state.position.addScaledVector(vel, dt);
+
+  // Wind: the air itself moves. A steady push downwind, plus a gentle
+  // weathervane nudge from a crosswind — the nose turns into the wind.
+  // In the storm it is strong enough to cost rings if the pilot does not
+  // correct for it; in calm air it is a whisper.
+  if (ctx.wind) {
+    state.position.x += ctx.wind.x * dt;
+    state.position.z += ctx.wind.z * dt;
+    const rightX = -forward.z;
+    const rightZ = forward.x;
+    const cross = ctx.wind.x * rightX + ctx.wind.z * rightZ;
+    state.heading += cross * 0.0012 * dt * (state.speed / 40 + 0.3);
+  }
 
   // Cargo drop: press C over a marked meadow. The crate keeps the plane's
   // forward motion while it falls, so the pilot leads the target.
@@ -200,6 +222,10 @@ export function stepFlight(state, ctl, ctx, dt) {
         state.score += RINGS.landingBonus;
         if (state.mission === 'sprint' && state.time < MISSION_TUNING.sprintPar) {
           state.timeBonus = Math.round((MISSION_TUNING.sprintPar - state.time) * MISSION_TUNING.sprintBonusPerSecond);
+          state.score += state.timeBonus;
+        }
+        if (state.mission === 'storm' && state.time < STORM_TUNING.par) {
+          state.timeBonus = Math.round((STORM_TUNING.par - state.time) * STORM_TUNING.bonusPerSecond);
           state.score += state.timeBonus;
         }
         if (state.damage >= 100) return crash(state, 'The airframe gave out on touchdown.');
@@ -269,7 +295,7 @@ export function stepFlight(state, ctl, ctx, dt) {
       next.passed = true;
       state.ringsPassed += 1;
       state.score += RINGS.points;
-      state.fuel = Math.min(PLANE.fuelCapacity, state.fuel + PLANE.ringFuelBonus);
+      state.fuel = Math.min(T.fuelCapacity, state.fuel + PLANE.ringFuelBonus);
       events |= EVENT_RING;
     }
   }

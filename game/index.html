@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cloudrunner — Kestrel Valley flight game: 4 missions, fuel &amp; damage</title>
+<title>Cloudrunner — Kestrel Valley flight game: 5 missions, weather, hangar, fuel &amp; damage</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #f7c489; font-family: "Segoe UI", system-ui, sans-serif; }
   #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
@@ -31,6 +31,19 @@
   .mission-btn:hover { background: rgba(255, 255, 255, 0.22); }
   .mission-btn.picked { background: #ffc21a; color: #14202e; border-color: #ffc21a; }
   .mission-keys { margin-top: 10px; font-size: 13px; color: #9fd8ef; }
+  .plane-picker { display: flex; gap: 8px; justify-content: center; margin-top: 12px; flex-wrap: wrap; }
+  .plane-btn.picked { background: #7ee0a3; color: #14202e; border-color: #7ee0a3; }
+
+  /* --- Pilot Log records page --- */
+  .log-wrap { max-width: 660px; max-height: 46vh; overflow-y: auto; background: rgba(10, 18, 28, 0.72);
+    border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 10px; padding: 10px 16px; margin-top: 12px; }
+  .log-table { width: 100%; border-collapse: collapse; font-size: 14px; color: #dfeef8; margin: 6px 0; }
+  .log-table th { color: #9fd8ef; letter-spacing: 1px; font-size: 11px; text-align: left; padding: 6px 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.25); }
+  .log-table td { padding: 6px 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+  .log-table td b { color: #ffe9a8; }
+  .log-actions { display: flex; gap: 10px; margin-top: 16px; }
+  .log-empty { color: #9fd8ef; font-size: 15px; padding: 18px 0; }
 
   /* --- HUD left column: gauges and artificial horizon --- */
   .hud-left { position: absolute; left: 14px; top: 96px; display: flex; flex-direction: column; gap: 12px; width: 190px; }
@@ -60,6 +73,7 @@
   .hud-banner.show { opacity: 1; }
   .hud-banner.warn { color: #ff8a7a; }
   .hud-banner.info { color: #cfe8f5; font-size: 26px; }
+  .hud-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
 
   /* --- Full screens: title / paused / over --- */
   .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
