@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cloudrunner — Kestrel Valley flight game: 5 missions, weather, hangar, fuel &amp; damage</title>
+<title>Cloudrunner — Kestrel Valley flight game: 7 missions, weather, hangar, time of day, fuel &amp; damage</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #f7c489; font-family: "Segoe UI", system-ui, sans-serif; }
   #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
@@ -74,6 +74,26 @@
   .hud-banner.warn { color: #ff8a7a; }
   .hud-banner.info { color: #cfe8f5; font-size: 26px; }
   .hud-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+
+  /* --- Valley minimap (bottom right) and achievement toast --- */
+  .hud-minimap { position: absolute; right: 14px; bottom: 14px; text-align: center; }
+  .hud-minimap canvas { width: 190px; height: 190px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.25);
+    box-shadow: 0 0 14px rgba(0, 0, 0, 0.35); display: block; }
+  .hud-minimap label { font-size: 10px; letter-spacing: 2px; color: #9fd8ef; }
+  .hud-toast { position: absolute; left: 50%; top: 30%; transform: translateX(-50%); font-size: 18px; font-weight: 700;
+    color: #14202e; background: #ffc21a; border-radius: 8px; padding: 10px 18px; opacity: 0; transition: opacity 0.3s;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.4); white-space: nowrap; pointer-events: none; }
+  .hud-toast.show { opacity: 1; }
+
+  /* --- Title screen: time-of-day picker and Valley Tour panel --- */
+  .daylight-picker { display: flex; gap: 8px; justify-content: center; margin-top: 12px; flex-wrap: wrap; }
+  .daylight-btn.picked { background: #7fb4e8; color: #14202e; border-color: #7fb4e8; }
+  .campaign-panel { max-width: 560px; background: rgba(10, 18, 28, 0.55); border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 10px; padding: 10px 16px; margin-top: 14px; text-align: left; }
+  .campaign-panel b { color: #ffc21a; letter-spacing: 2px; font-size: 13px; }
+  .campaign-panel p { margin: 6px 0 8px; line-height: 1.5; font-size: 14px; }
+  .campaign-panel .log-table { margin: 0; font-size: 13px; }
+  .campaign-panel .log-table td { padding: 3px 8px; }
 
   /* --- Full screens: title / paused / over --- */
   .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;

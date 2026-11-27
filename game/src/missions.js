@@ -1,4 +1,4 @@
-// Cloudrunner — missions: the five sorties flown over Kestrel Valley.
+// Cloudrunner — missions: the seven sorties flown over Kestrel Valley.
 // One job: name each mission, its goal and its scoring, and place the
 // mission targets (cargo drop zones, the rescue pad) in the world.
 // The setting is one coherent place: Kestrel Valley, a golden-hour alpine
@@ -34,6 +34,15 @@ export const RESCUE_PAD = {
 };
 
 export const MISSIONS = {
+  school: {
+    id: 'school',
+    name: 'Flight School',
+    short: 'FLIGHT SCHOOL',
+    tagline: 'First flight, with a coach: throttle up, lift off, thread ring 1, land. Every lesson step pays +100.',
+    objective: 'Follow the coach: throttle, takeoff, climb, turn, ring 1, land.',
+    parTime: null,
+    crates: 0,
+  },
   'ring-run': {
     id: 'ring-run',
     name: 'Ring Run',
@@ -80,9 +89,19 @@ export const MISSIONS = {
     crates: 0,
     storm: true,
   },
+  precision: {
+    id: 'precision',
+    name: 'Precision Landing',
+    short: 'PRECISION',
+    tagline: 'Night landing, by the book: fly the approach gate on the 3° slope, then land in the touchdown zone. Graded A–F.',
+    objective: 'Fly the gold approach gate, then land in the touchdown zone (graded).',
+    parTime: null,
+    crates: 0,
+    daylight: 'night',
+  },
 };
 
-export const MISSION_ORDER = ['ring-run', 'cargo', 'rescue', 'sprint', 'storm'];
+export const MISSION_ORDER = ['school', 'ring-run', 'cargo', 'rescue', 'sprint', 'storm', 'precision'];
 
 export function missionById(id) {
   return MISSIONS[id] ?? MISSIONS['ring-run'];

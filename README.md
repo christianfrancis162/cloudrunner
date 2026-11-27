@@ -4,15 +4,17 @@
 [![rank](https://make.fun/badge/best-flight-game-20261126-0057/christianfrancis162/cloudrunner/rank.svg)](https://make.fun/bounty/best-flight-game-20261126-0057/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=best-flight-game-20261126-0057)
 [![reward](https://make.fun/badge/best-flight-game-20261126-0057/christianfrancis162/cloudrunner/reward.svg)](https://make.fun/bounty/best-flight-game-20261126-0057?utm_source=github&utm_medium=readme&utm_campaign=best-flight-game-20261126-0057)
 
-Cloudrunner is a 3D arcade flight game set in Kestrel Valley, a golden-hour alpine valley with Kestrel Field airfield, Lake Solenne and the Kestrel Hut refuge: fly through 5 sorties — Ring Run, Cargo Drop, Rescue Pickup, Timed Sprint and Storm Run — manage fuel and airframe damage, read the live wind, and land back on the runway for the touchdown bonus.
+Cloudrunner is a 3D arcade flight game set in Kestrel Valley, a golden-hour alpine valley with Kestrel Field airfield, Lake Solenne and the Kestrel Hut refuge: fly through 7 sorties — Flight School, Ring Run, Cargo Drop, Rescue Pickup, Timed Sprint, Storm Run and Precision Landing — manage fuel and airframe damage, read the live wind, pick your hour from dawn to night, and land back on the runway for the touchdown bonus.
 
 ## Missions
 
+- **Flight School** — first flight, with a coach: throttle up, lift off, climb, turn, thread ring 1, land. Every lesson step pays +100.
 - **Ring Run** — fly through all 8 glowing rings, then land.
 - **Cargo Drop** — drop a supply crate into each of the 3 marked meadows (C to drop; closer to the centre scores more), then land.
 - **Rescue Pickup** — land on the Kestrel Hut pad, hold still for 3 s while the stranded hiker boards, then fly home and land.
 - **Timed Sprint** — all 8 rings against a 2:30 par; every second under par pays +5.
 - **Storm Run** — all 8 rings in a valley storm: 14 m/s gusts, low cloud and rain, against a 2:00 par; every second under par pays +6.
+- **Precision Landing** — night landing, by the book: fly the gold approach gate on the 3° glide slope, then land in the touchdown zone. Graded A–F on vertical speed, centreline and speed; a perfect landing pays +400.
 
 ## Weather
 
@@ -25,6 +27,26 @@ Three planes, three ways to fly: the **Kestrel K-2 "Cloudrunner"** (nimble, tigh
 ## Pilot Log
 
 Every sortie is recorded — mission, plane, score, time, rings, landing or crash. The records page shows best score and best time per mission, total flights and hours, and the recent flights table. Clear it with a double-press of CLEAR LOG.
+
+## Time of Day
+
+Four hours over the same valley — Dawn, Golden Hour, Dusk and Night — picked on the title screen and remembered between visits. Night flying is real flying: the runway edge lights and the PAPI glow, the landing light rides the nose, and the pilot lands by instruments and light. Precision Landing always flies at night.
+
+## PAPI & Night Flying
+
+A four-light PAPI beside the south threshold reads the 3° glide slope live — two white, two red on the slope; white when high, red when low — and the HUD spells out the reading (ON SLOPE, TOO HIGH, TOO LOW). The same slope is what Precision Landing grades against, so the lights and the score agree.
+
+## Valley Tour
+
+The seven sorties as one tour: fly them in order, earn a bronze, silver or gold medal per sortie from the score, and watch the tour total grow. The title screen shows every medal, the best score per sortie, and the bar for the next medal up.
+
+## Achievements
+
+Fourteen feats on record — First Ring, Bullseye, Storm Survivor, Night Owl, Ace Landing, High Roller, Graduate and more — toasted the moment they happen and kept on the title screen.
+
+## Minimap
+
+A live top-down map of the valley in the corner of the HUD: the runway, Lake Solenne, the ring course with the next ring pulsing gold, the drop zones, the rescue pad, and the plane as an arrow on its heading.
 
 ## Damage
 

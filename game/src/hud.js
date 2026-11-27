@@ -7,6 +7,11 @@ import { PLANE, MISSION_TUNING, STORM_TUNING } from './config.js';
 import { missionById, MISSION_ORDER } from './missions.js';
 import { PLANE_ORDER, planeById, planeCard } from './planes.js';
 import { formatFlightTime, formatLogDate } from './log.js';
+import { createMinimap, updateMinimap } from './minimap.js';
+import { loadCampaign, campaignLine, campaignRows } from './campaign.js';
+import { achievementSummary } from './achievements.js';
+import { DAYLIGHT_ORDER, daylightCard } from './daylight.js';
+import { papiWords } from './papi.js';
 
 const COMPASS_POINTS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 
@@ -19,6 +24,7 @@ export function createHud(root) {
       <div class="hud-box" id="hud-vsi"><label>VERT SPEED</label><b id="hud-vs">0</b><span>ft/min</span></div>
       <div class="hud-box" id="hud-compass"><label>HEADING</label><b id="hud-hdg">000°</b><span id="hud-cardinal">N</span></div>
       <div class="hud-box" id="hud-wind"><label>WIND</label><b id="hud-wind-knots">0</b><span>kt</span><span id="hud-wind-dir">N</span></div>
+      <div class="hud-box hidden" id="hud-papi-box"><label>PAPI</label><b id="hud-papi-reading">WWRR</b><span id="hud-papi-words">ON SLOPE</span></div>
       <div class="hud-box" id="hud-ring"><label>RING</label><b id="hud-ringcount">0/8</b><span id="hud-ringdist"></span></div>
       <div class="hud-box" id="hud-score"><label>SCORE</label><b id="hud-points">0</b><span id="hud-time">0:00</span></div>
       <div class="hud-box hud-mission-box" id="hud-mission"><label>MISSION</label><b id="hud-mission-name">RING RUN</b><span id="hud-mission-progress"></span></div>
@@ -52,6 +58,8 @@ export function createHud(root) {
     <div class="hud-arrow" id="hud-arrow">➤</div>
     <div class="hud-banner" id="hud-banner"></div>
     <div class="hud-flash" id="hud-flash"></div>
+    <div class="hud-minimap"><canvas id="hud-minimap-canvas"></canvas><label>KESTREL VALLEY</label></div>
+    <div class="hud-toast" id="hud-toast"></div>
   </div>
   <div id="screen-title" class="screen">
     <h1>CLOUDRUNNER</h1>
@@ -62,9 +70,13 @@ export function createHud(root) {
       then land back on the runway for the touchdown bonus. Rings refuel you — an empty
       tank means a glide home. Hard hits damage the airframe.</p>
       <div class="mission-picker" id="mission-picker"></div>
-      <p class="mission-keys">Press <b>1–5</b> or click to pick a sortie</p>
+      <p class="mission-keys">Press <b>1–7</b> or click to pick a sortie</p>
       <div class="plane-picker" id="plane-picker"></div>
       <p class="mission-keys" id="plane-desc">Kestrel K-2 — nimble stunt plane, 85 fuel</p>
+      <div class="daylight-picker" id="daylight-picker"></div>
+      <p class="mission-keys" id="daylight-desc">Golden Hour — late sun, warm haze</p>
+      <div class="campaign-panel" id="campaign-panel"></div>
+      <p class="mission-keys" id="achievements-line"></p>
       <p><button class="mission-btn" id="btn-log">PILOT LOG — RECORDS</button></p>
     </div>
     <div class="controls">
@@ -144,7 +156,19 @@ export function createHud(root) {
     logClear: el('btn-log-clear'),
     logBack: el('btn-log-back'),
     logConfirm: el('log-confirm'),
+    papiBox: el('hud-papi-box'),
+    papiReading: el('hud-papi-reading'),
+    papiWords: el('hud-papi-words'),
+    minimapCanvas: el('hud-minimap-canvas'),
+    toast: el('hud-toast'),
+    daylightPicker: el('daylight-picker'),
+    daylightDesc: el('daylight-desc'),
+    campaignPanel: el('campaign-panel'),
+    achievementsLine: el('achievements-line'),
   };
+
+  // Valley minimap in the corner of the HUD, drawn from the live state.
+  const minimap = createMinimap(refs.minimapCanvas);
 
   // Mission picker on the title screen: one button per sortie.
   let selectedMission = 'ring-run';
@@ -198,6 +222,64 @@ export function createHud(root) {
   }
   setPlane(selectedPlane);
 
+  // Time-of-day picker on the title screen: dawn, golden hour, dusk,
+  // night — one button each, with the picked hour's line under it.
+  let selectedDaylight = 'golden';
+  for (const id of DAYLIGHT_ORDER) {
+    const card = daylightCard(id);
+    const btn = document.createElement('button');
+    btn.className = 'mission-btn daylight-btn';
+    btn.dataset.daylight = id;
+    btn.textContent = card.short;
+    btn.title = card.tagline;
+    btn.addEventListener('click', () => {
+      setDaylight(id);
+      root.dispatchEvent(new CustomEvent('daylightpick', { bubbles: true, detail: id }));
+    });
+    refs.daylightPicker.appendChild(btn);
+  }
+
+  function setDaylight(id) {
+    selectedDaylight = daylightCard(id).id;
+    const card = daylightCard(selectedDaylight);
+    refs.daylightDesc.textContent = `${card.name} — ${card.tagline}`;
+    for (const btn of refs.daylightPicker.querySelectorAll('.daylight-btn')) {
+      btn.classList.toggle('picked', btn.dataset.daylight === selectedDaylight);
+    }
+  }
+  setDaylight(selectedDaylight);
+
+  // Valley Tour panel on the title screen: the tour line plus one row per
+  // sortie — medal, best score, and the bar for the next medal up.
+  function renderCampaign() {
+    const record = loadCampaign();
+    const rows = campaignRows(record).map((row) => `
+      <tr><td>${row.name}</td><td>${row.medalEmoji}</td><td>${row.bestScore || '—'}</td><td>${row.nextBar ? `next ${row.nextBar}` : 'gold ✓'}</td></tr>`).join('');
+    refs.campaignPanel.innerHTML = `
+      <b>VALLEY TOUR</b><p>${campaignLine(record)}</p>
+      <table class="log-table"><tbody>${rows}</tbody></table>`;
+    const summary = achievementSummary();
+    refs.achievementsLine.textContent = summary.unlocked > 0
+      ? `Achievements ${summary.unlocked}/${summary.total} unlocked — fly more to earn the rest.`
+      : `Achievements 0/${summary.total} — first ring, bullseye, storm survivor…`;
+  }
+  renderCampaign();
+
+  // PAPI readout for the Precision Landing mission: the four-light
+  // reading plus what it means, updated from main.js every frame.
+  function setPapi(reading) {
+    refs.papiReading.textContent = reading;
+    refs.papiWords.textContent = papiWords(reading);
+  }
+
+  // Achievement toast: a gold banner that fades after a few seconds.
+  let toastTimer = 0;
+  function toastAchievement(achievement) {
+    refs.toast.textContent = `🏆 ${achievement.name} — ${achievement.text}`;
+    refs.toast.classList.add('show');
+    toastTimer = 4;
+  }
+
   // Pilot Log: open the records page, clear it (with a confirm step),
   // or go back to the title screen.
   refs.logBtn.addEventListener('click', () => {
@@ -226,7 +308,7 @@ export function createHud(root) {
     bannerTimer = 2.2;
   }
 
-  function update(state, ringInfo, dt) {
+  function update(state, ringInfo, dt, rings) {
     const knots = Math.round(state.speed * 1.944);
     const feet = Math.round((state.position.y - 2) * 3.281);
     const vsFpm = Math.round(state.verticalSpeed * 196.85);
@@ -269,7 +351,17 @@ export function createHud(root) {
       progress = `STORM PAR ${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')}`;
     } else progress = `${state.ringsPassed}/8 RINGS`;
     refs.missionProgress.textContent = progress;
-    refs.objective.textContent = mission.objective;
+    refs.objective.textContent = state.mission === 'school' && state.coachLine
+      ? state.coachLine
+      : mission.objective;
+    // PAPI box only on the Precision Landing mission; the minimap draws
+    // every frame from the live state and the ring course.
+    refs.papiBox.classList.toggle('hidden', state.mission !== 'precision');
+    updateMinimap(minimap, state, rings ?? [], state.mission);
+    if (toastTimer > 0) {
+      toastTimer -= dt;
+      if (toastTimer <= 0) refs.toast.classList.remove('show');
+    }
     // Artificial horizon: the sky/ground split tilts with bank and shifts with pitch.
     // A left bank (positive bank) tilts the horizon clockwise in the gauge.
     const horizonEl = refs.horizon;
@@ -300,6 +392,7 @@ export function createHud(root) {
     refs.over.classList.toggle('hidden', name !== 'over');
     refs.logScreen.classList.toggle('hidden', name !== 'log');
     refs.hud.classList.toggle('hidden', name !== 'playing' && name !== 'paused');
+    if (name === 'title') renderCampaign();
     if (name === 'log' && logData) showLog(logData);
     if (name === 'over' && overData) {
       refs.overTitle.textContent = overData.title;
@@ -345,5 +438,5 @@ export function createHud(root) {
     refs.again.dispatchEvent(new CustomEvent('flyagain', { bubbles: true }));
   });
 
-  return { update, showBanner, showScreen, setBest, setMission, setPlane, PLANE_FUEL_CAPACITY: PLANE.fuelCapacity };
+  return { update, showBanner, showScreen, setBest, setMission, setPlane, setDaylight, toastAchievement, setPapi, renderCampaign, PLANE_FUEL_CAPACITY: PLANE.fuelCapacity };
 }

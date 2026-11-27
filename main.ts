@@ -1,6 +1,8 @@
 // Cloudrunner v2 — a 3D flight game entry for make.fun's best-flight-game-20261126-0057.
-// Four sorties over Kestrel Valley (Ring Run, Cargo Drop, Rescue Pickup,
-// Timed Sprint), a damage model that degrades handling, and a named
+// Seven sorties over Kestrel Valley (Flight School, Ring Run, Cargo Drop,
+// Rescue Pickup, Timed Sprint, Storm Run, Precision Landing), a damage
+// model that degrades handling, time of day, PAPI approach lighting, a
+// Valley Tour campaign with medals, achievements, a minimap, and a named
 // setting: Kestrel Field, Lake Solenne, the Kestrel Hut refuge.
 
 // The game is this directory's game/ folder: plain static files a desktop

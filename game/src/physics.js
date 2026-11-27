@@ -12,6 +12,7 @@ import { PLANE, RINGS, WORLD, MISSION_TUNING, STORM_TUNING } from './config.js';
 import { groundHeight, RUNWAY } from './terrain.js';
 import { DROP_ZONES, RESCUE_PAD, dropScore } from './missions.js';
 import { planeTuning } from './planes.js';
+import { gradeLanding, PRECISION_TUNING, approachGatePosition } from './precision.js';
 
 export const EVENT_NONE = 0;
 export const EVENT_RING = 1 << 0;
@@ -22,6 +23,7 @@ export const EVENT_LOW_FUEL = 1 << 4;
 export const EVENT_DROP = 1 << 5;
 export const EVENT_PICKUP = 1 << 6;
 export const EVENT_DAMAGE = 1 << 7;
+export const EVENT_GATE = 1 << 8;
 
 // Fresh flight state: parked at the south end of the runway, facing north.
 // The plane matters: the Kestrel is nimble and thirsty, the Albatross
@@ -63,6 +65,12 @@ export function createFlightState(mission = 'ring-run', planeId = 'kestrel') {
     rescued: false,
     pickupTimer: 0,
     onPad: false,
+    // Precision Landing: the approach gate on the 3-degree slope, and the
+    // landing grade once the wheels touch. The gate position is fixed for
+    // the flight so the check below is one distance test per step.
+    landingGrade: null,
+    gatePassed: false,
+    gatePosition: mission === 'precision' ? approachGatePosition() : null,
   };
 }
 
@@ -228,6 +236,19 @@ export function stepFlight(state, ctl, ctx, dt) {
           state.timeBonus = Math.round((STORM_TUNING.par - state.time) * STORM_TUNING.bonusPerSecond);
           state.score += state.timeBonus;
         }
+        if (state.mission === 'precision') {
+          // A graded landing: vertical speed, centreline and speed at the
+          // wheels-down moment, plus where along the runway they touched
+          // (metres past the south threshold). The grade pays on top of
+          // the landing bonus; a long landing halves it.
+          state.landingGrade = gradeLanding({
+            verticalSpeed: vSpeed,
+            centreline: state.position.x,
+            speed: state.speed,
+            along: WORLD.runwayLength / 2 - state.position.z,
+          });
+          state.score += state.landingGrade.bonus;
+        }
         if (state.damage >= 100) return crash(state, 'The airframe gave out on touchdown.');
         events |= EVENT_LANDED;
       } else if (onPad && vSpeed < PLANE.crashSpeed && Math.abs(state.bank) < 0.35 && state.speed < 70) {
@@ -284,6 +305,18 @@ export function stepFlight(state, ctl, ctx, dt) {
   if (state.position.y > 700) {
     state.position.y = 700;
     state.pitch = Math.min(state.pitch, 0);
+  }
+
+  // Precision Landing: the approach gate on the glide slope. Flying
+  // through it pays once — it is the gate the PAPI flies the pilot down
+  // through, so the bonus and the lights agree.
+  if (state.mission === 'precision' && !state.gatePassed && state.gatePosition && state.airborne) {
+    const gd = state.position.distanceTo(state.gatePosition);
+    if (gd < PRECISION_TUNING.gateRadius) {
+      state.gatePassed = true;
+      state.score += PRECISION_TUNING.gateBonus;
+      events |= EVENT_GATE;
+    }
   }
 
   // Ring passes: within the ring radius of the next ring's centre. Rings

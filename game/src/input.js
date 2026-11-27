@@ -30,6 +30,8 @@ const KEYMAP = {
   Digit3: 'mission3',
   Digit4: 'mission4',
   Digit5: 'mission5',
+  Digit6: 'mission6',
+  Digit7: 'mission7',
 };
 
 export function createInput(canvas) {
@@ -92,7 +94,7 @@ export function createInput(canvas) {
     return taken;
   }
 
-  // Read and clear the last mission picked with keys 1-4 (-1 when none).
+  // Read and clear the last mission picked with keys 1-7 (-1 when none).
   function takeMissionSelect() {
     const picked = missionSelected;
     missionSelected = -1;

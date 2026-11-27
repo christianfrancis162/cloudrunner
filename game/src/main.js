@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { STEP, PLANE, RINGS, pickSeed } from './config.js';
 import { createTerrain, updateClouds, groundHeight, RUNWAY } from './terrain.js';
 import { createAircraft, poseAircraft } from './aircraft.js';
-import { createFlightState, stepFlight, forwardVector, EVENT_RING, EVENT_LANDED, EVENT_CRASHED, EVENT_TAKEOFF, EVENT_LOW_FUEL, EVENT_DROP, EVENT_PICKUP, EVENT_DAMAGE } from './physics.js';
+import { createFlightState, stepFlight, forwardVector, EVENT_RING, EVENT_LANDED, EVENT_CRASHED, EVENT_TAKEOFF, EVENT_LOW_FUEL, EVENT_DROP, EVENT_PICKUP, EVENT_DAMAGE, EVENT_GATE } from './physics.js';
 import { createInput, ACTION_CONFIRM, ACTION_PAUSE, ACTION_RESTART, ACTION_MUTE, ACTION_DROP } from './input.js';
 import { createHud } from './hud.js';
 import { createAudio } from './audio.js';
@@ -17,6 +17,12 @@ import { createRings } from './rings.js';
 import { stageShot } from './shots.js';
 import { missionById, MISSION_ORDER, SETTING } from './missions.js';
 import { STORM_TUNING } from './config.js';
+import { loadDaylight, saveDaylight, applyDaylight, isNight, daylightById } from './daylight.js';
+import { createPapi, updatePapi, createRunwayLights, updateRunwayLights, createLandingLight, updateLandingLight } from './papi.js';
+import { gradeWords, approachGatePosition, PRECISION_TUNING } from './precision.js';
+import { recordCampaignResult, MEDAL_NAMES } from './campaign.js';
+import { checkAchievements, achievementContext } from './achievements.js';
+import { createTutorial, tutorialTick, schoolResultLine, SCHOOL_STEP_POINTS, TUTORIAL_STEPS } from './tutorial.js';
 import {
   createWeather, updateWeather, windVector, windKnots, windCompass,
   createWindSock, updateWindSock, createRain, updateRain, setRainVisible,
@@ -34,6 +40,7 @@ const seed = pickSeed(params.get('seed'));
 const shotMission = missionById(params.get('mission')).id;
 let selectedMission = shot ? shotMission : missionById(params.get('mission')).id;
 let selectedPlane = 'kestrel';
+let daylightId = loadDaylight();
 let weather = createWeather(seed, selectedMission);
 
 const canvas = document.getElementById('game');
@@ -76,7 +83,8 @@ sun.shadow.camera.top = 120;
 sun.shadow.camera.bottom = -120;
 sun.shadow.camera.far = 2200;
 scene.add(sun);
-scene.add(new THREE.HemisphereLight(0xbfd9ff, 0x6f8f5a, 0.9));
+const hemi = new THREE.HemisphereLight(0xbfd9ff, 0x6f8f5a, 0.9);
+scene.add(hemi);
 
 // Sun disc low on the horizon, in the direction of the light.
 const sunDisc = new THREE.Mesh(
@@ -86,6 +94,37 @@ const sunDisc = new THREE.Mesh(
 sunDisc.position.set(-1800, 420, 1200);
 sunDisc.lookAt(0, 0, 0);
 scene.add(sunDisc);
+
+// --- Time of day and approach lighting -----------------------------------
+// The hour paints the whole valley (daylight.js owns the palette); the
+// PAPI reads the glide slope, the runway edge lights carry the strip at
+// night, and the landing light rides the nose. The gold approach gate
+// hangs on the 3-degree slope south of the threshold, for Precision
+// Landing only — hidden in every other mission.
+applyDaylight(daylightId, { scene, sun, sunDisc, hemi, skyMat });
+const papi = createPapi();
+scene.add(papi.group);
+const runwayLights = createRunwayLights();
+scene.add(runwayLights.group);
+const landingLight = createLandingLight();
+scene.add(landingLight.light);
+scene.add(landingLight.target);
+const gateGeo = new THREE.TorusGeometry(PRECISION_TUNING.gateRadius, 1.1, 10, 40);
+const gateMat = new THREE.MeshBasicMaterial({ color: 0xffc21a, transparent: true, opacity: 0.9 });
+const gateMesh = new THREE.Mesh(gateGeo, gateMat);
+gateMesh.position.copy(approachGatePosition());
+gateMesh.visible = selectedMission === 'precision';
+scene.add(gateMesh);
+
+// A mission can ask for an hour: Precision Landing always flies at night.
+function applyMissionDaylight(missionId) {
+  const wanted = missionById(missionId).daylight;
+  if (!wanted) return;
+  daylightId = daylightById(wanted).id;
+  saveDaylight(daylightId);
+  applyDaylight(daylightId, { scene, sun, sunDisc, hemi, skyMat });
+  hud.setDaylight(daylightId);
+}
 
 // --- Weather dressing ------------------------------------------------------
 // A windsock by the runway that reads the live wind, rain that falls only
@@ -102,6 +141,7 @@ const lightning = createLightning(seed);
 function applyWeatherVisuals() {
   setRainVisible(rain, weather.storm);
   stormClouds.group.visible = weather.storm;
+  gateMesh.visible = selectedMission === 'precision';
 }
 applyWeatherVisuals();
 
@@ -125,6 +165,7 @@ camera.position.set(0, 12, 200);
 
 const hud = createHud(hudRoot);
 const audio = createAudio();
+applyMissionDaylight(selectedMission);
 
 let state = createFlightState(selectedMission, selectedPlane);
 let screen = 'title';
@@ -170,7 +211,7 @@ function formatTime(t) {
   return `${mins}:${String(secs).padStart(2, '0')}`;
 }
 
-function overData() {
+function overData(extra = {}) {
   const landed = state.landed;
   const mission = missionById(state.mission);
   let reason;
@@ -181,9 +222,14 @@ function overData() {
     if (state.mission === 'sprint' && state.timeBonus > 0) reason += ` Beat the par by ${Math.round(state.timeBonus / 5)}s: +${state.timeBonus} time bonus.`;
     if (state.mission === 'storm' && state.timeBonus > 0) reason += ` Beat the storm par by ${Math.round(state.timeBonus / 6)}s: +${state.timeBonus} time bonus.`;
     if (state.mission === 'storm') reason += ' Flown through the storm — gusts, rain and all.';
+    if (state.mission === 'precision' && state.landingGrade) reason += ` ${gradeWords(state.landingGrade)}`;
+    if (state.mission === 'school') reason += ` ${schoolResultLine(tutorial, true)}`;
+    if (extra.tour && extra.tour.improved) reason += ` Valley Tour: new ${MEDAL_NAMES[extra.tour.earned]} medal for ${mission.name}.`;
+    if (extra.newly && extra.newly.length) reason += ` Achievements: ${extra.newly.map((a) => a.name).join(', ')}.`;
     if (state.damage >= 60) reason += ' The airframe needs work after that one.';
   } else {
     reason = state.crashReason || 'The sortie is over.';
+    if (state.mission === 'school') reason += ` ${schoolResultLine(tutorial, false)}`;
   }
   return {
     title: landed ? `${mission.short} COMPLETE` : 'CRASHED',
@@ -199,6 +245,31 @@ function overData() {
 
 function announce(message) {
   status.textContent = message;
+}
+
+// Shared per-tick bookkeeping for the live game and the screenshot
+// stager alike: the Flight School coach advances (each finished lesson
+// step pays) and achievements are checked the moment they happen, so a
+// feat is toasted in the frame it happens, not at the end of the sortie.
+let tutorial = createTutorial();
+function noteFlightEvent(events) {
+  if (state.mission === 'school' && !state.landed && !state.crashed) {
+    const before = tutorial.step;
+    const current = tutorialTick(tutorial, state, events);
+    if (current.index > before) {
+      const gained = (current.index - before) * SCHOOL_STEP_POINTS;
+      state.score += gained;
+      hud.showBanner(`LESSON STEP ${current.index}/${current.total} +${gained}`, 'ring');
+    }
+    state.coachLine = current.finished
+      ? 'Lesson complete — bring her home and land.'
+      : `${current.coach}`;
+  }
+  const newly = [];
+  if (events & EVENT_RING) newly.push(...checkAchievements('ring', achievementContext(state)));
+  if (events & EVENT_DROP) newly.push(...checkAchievements('drop', achievementContext(state)));
+  if (events & EVENT_PICKUP) newly.push(...checkAchievements('pickup', achievementContext(state)));
+  for (const a of newly) hud.toastAchievement(a);
 }
 
 // --- Camera ----------------------------------------------------------------
@@ -255,10 +326,17 @@ function renderFrame(dt) {
   state.lightningFlash = lightning.flash;
   // The wind gauge reads the live weather, straight off the flight state.
   state.wind = { knots: windKnots(weather), dir: windCompass(weather).label };
+  // Approach lighting: the PAPI reads the live glide slope, the runway
+  // lights and the landing light follow the hour, and the gold gate
+  // pulses when it is the mission's target.
+  hud.setPapi(updatePapi(papi, state));
+  updateRunwayLights(runwayLights, isNight(daylightId));
+  updateLandingLight(landingLight, state, isNight(daylightId));
+  if (gateMesh.visible) gateMat.opacity = 0.7 + 0.25 * Math.sin(state.time * 5);
   ringsMod.update(state.ringsPassed, state.time);
   poseAircraft(aircraft, state, dt);
   updateCamera(dt);
-  hud.update(state, ringInfo(), dt);
+  hud.update(state, ringInfo(), dt, ringsMod.rings);
   audio.update(state);
   renderer.render(scene, camera);
 }
@@ -268,6 +346,7 @@ function resetWorld(mission = selectedMission) {
   state = createFlightState(mission, selectedPlane);
   weather = createWeather(seed, mission);
   applyWeatherVisuals();
+  tutorial = createTutorial();
   ringsMod.rings.forEach((ring) => { ring.passed = false; });
   clearCrates();
   camTarget.set(0, 12, 200);
@@ -299,7 +378,14 @@ function endGame() {
     crashed: state.crashed,
     damage: state.damage,
   });
-  hud.showScreen('over', overData());
+  // The Valley Tour takes the medal for this sortie, and the achievements
+  // the flight earned are checked last — the 'end' checks read the log
+  // count and the medal just earned.
+  const tour = recordCampaignResult(state.mission, state.score, state.landed);
+  const logFlights = loadLog().length;
+  const newly = checkAchievements('end', achievementContext(state, { logFlights, medalEarned: tour.earned }));
+  for (const a of newly) hud.toastAchievement(a);
+  hud.showScreen('over', overData({ tour, newly }));
   hud.setBest(best);
   announce(state.landed ? `Mission complete. Score ${state.score}.` : `Crashed. ${state.crashReason} Score ${state.score}.`);
 }
@@ -317,8 +403,13 @@ const game = {
   step(ctl, dt) {
     updateWeather(weather, dt);
     const events = stepFlight(state, ctl, { rings: ringsMod.rings, mission: state.mission, wind: windVector(weather) }, dt);
+    noteFlightEvent(events);
     if (events & EVENT_RING) {
       hud.showBanner(`RING ${state.ringsPassed}! +${RINGS.points}`, 'ring');
+      audio.ringChime();
+    }
+    if (events & EVENT_GATE) {
+      hud.showBanner(`APPROACH GATE +${PRECISION_TUNING.gateBonus}`, 'ring');
       audio.ringChime();
     }
     if (events & EVENT_DROP) {
@@ -371,6 +462,24 @@ const game = {
     if (state.mission === 'storm') {
       state.timeBonus = 120;
       state.score += 120;
+    }
+    if (state.mission === 'school') {
+      // The lesson steps the autopilot did not finish yet pay out here,
+      // so the staged finish shows a completed lesson, not a half one.
+      const remaining = Math.max(0, TUTORIAL_STEPS.length - tutorial.step);
+      state.score += remaining * SCHOOL_STEP_POINTS;
+      tutorial.step = TUTORIAL_STEPS.length;
+    }
+    if (state.mission === 'precision') {
+      // A staged perfect landing: through the gate, grade A, in the zone.
+      state.gatePassed = true;
+      state.score += PRECISION_TUNING.gateBonus;
+      state.landingGrade = {
+        vsScore: 100, centreScore: 100, speedScore: 100, grade: 100, letter: 'A',
+        inZone: true, bonus: PRECISION_TUNING.maxGradeBonus,
+        verticalSpeed: 2.5, centreline: 1, speed: 43, along: 100,
+      };
+      state.score += state.landingGrade.bonus;
     }
     state.score += RINGS.landingBonus;
     state.landed = true;
@@ -434,6 +543,7 @@ function runGame() {
       selectedMission = MISSION_ORDER[picked];
       weather = createWeather(seed, selectedMission);
       applyWeatherVisuals();
+      applyMissionDaylight(selectedMission);
       hud.setMission(selectedMission);
     }
     if (actions & ACTION_DROP) dropQueued = true;
@@ -468,6 +578,7 @@ function runGame() {
     dropQueued = false;
     updateWeather(weather, STEP);
     const events = stepFlight(state, ctl, { rings: ringsMod.rings, mission: state.mission, wind: windVector(weather) }, STEP);
+    noteFlightEvent(events);
     if (events & EVENT_TAKEOFF) {
       hud.showBanner(`AIRBORNE — ${missionById(state.mission).short}`, 'info');
       announce('Airborne.');
@@ -476,6 +587,11 @@ function runGame() {
       hud.showBanner(`RING ${state.ringsPassed}! +${RINGS.points}`, 'ring');
       audio.ringChime();
       announce(`Ring ${state.ringsPassed} of ${RINGS.count}.`);
+    }
+    if (events & EVENT_GATE) {
+      hud.showBanner(`APPROACH GATE +${PRECISION_TUNING.gateBonus}`, 'ring');
+      audio.ringChime();
+      announce('Approach gate flown. Now land in the touchdown zone.');
     }
     if (events & EVENT_DROP) {
       const lastDrop = state.dropResults[state.dropResults.length - 1];
@@ -539,8 +655,16 @@ function runGame() {
       selectedMission = missionById(event.detail).id;
       weather = createWeather(seed, selectedMission);
       applyWeatherVisuals();
+      applyMissionDaylight(selectedMission);
       hud.setMission(selectedMission);
     }
+  });
+
+  hudRoot.addEventListener('daylightpick', (event) => {
+    daylightId = daylightById(event.detail).id;
+    saveDaylight(daylightId);
+    applyDaylight(daylightId, { scene, sun, sunDisc, hemi, skyMat });
+    announce(`Time of day: ${daylightById(daylightId).name}.`);
   });
 
   hudRoot.addEventListener('planepick', (event) => {
