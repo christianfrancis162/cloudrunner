@@ -4,7 +4,7 @@
 [![rank](https://make.fun/badge/best-flight-game-20261126-0057/christianfrancis162/cloudrunner/rank.svg)](https://make.fun/bounty/best-flight-game-20261126-0057/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=best-flight-game-20261126-0057)
 [![reward](https://make.fun/badge/best-flight-game-20261126-0057/christianfrancis162/cloudrunner/reward.svg)](https://make.fun/bounty/best-flight-game-20261126-0057?utm_source=github&utm_medium=readme&utm_campaign=best-flight-game-20261126-0057)
 
-Cloudrunner is a 3D arcade flight game set in Kestrel Valley, a golden-hour alpine valley with Kestrel Field airfield, Lake Solenne and the Kestrel Hut refuge: fly through 7 sorties — Flight School, Ring Run, Cargo Drop, Rescue Pickup, Timed Sprint, Storm Run and Precision Landing — manage fuel and airframe damage, read the live wind, pick your hour from dawn to night, and land back on the runway for the touchdown bonus.
+Cloudrunner is a 3D arcade flight game set in Kestrel Valley, a golden-hour alpine valley with Kestrel Field airfield, Lake Solenne and the Kestrel Hut refuge: fly through 8 sorties — Flight School, Ring Run, Cargo Drop, Rescue Pickup, Timed Sprint, Storm Run, Precision Landing and Photo Recon — manage fuel, engine heat and airframe damage, read the live wind, pick your hour from dawn to night, and land back on the runway for the touchdown bonus.
 
 ## Missions
 
@@ -15,6 +15,7 @@ Cloudrunner is a 3D arcade flight game set in Kestrel Valley, a golden-hour alpi
 - **Timed Sprint** — all 8 rings against a 2:30 par; every second under par pays +5.
 - **Storm Run** — all 8 rings in a valley storm: 14 m/s gusts, low cloud and rain, against a 2:00 par; every second under par pays +6.
 - **Precision Landing** — night landing, by the book: fly the gold approach gate on the 3° glide slope, then land in the touchdown zone. Graded A–F on vertical speed, centreline and speed; a perfect landing pays +400.
+- **Photo Recon** — photograph all four valley landmarks: Kestrel Field, Lake Solenne, Kestrel Hut and the Solenne River Bridge. Press C to shoot — inside the frame, inside the altitude band, wings level. A frame-filling shot pays 200, a wide one 50.
 
 ## Weather
 
@@ -51,6 +52,14 @@ A live top-down map of the valley in the corner of the HUD: the runway, Lake Sol
 ## Damage
 
 Hard touchdowns, terrain grazes and rough bounces damage the airframe: handling gets heavy, top speed falls, fuel burns faster, and at 100% damage the airframe gives out. Fly smooth or fly home wounded.
+
+## Engine Heat
+
+Full throttle cooks the engine — heat climbs with the square of the throttle, so bursts are free and a held-open throttle is a bill coming due. Past 85 the tower warns; at 100 the engine overheats, the power cuts out and the airframe takes damage until it cools below 60. The Falcon runs hottest, the Albatross coolest. Watch the gauge and fly the throttle like it matters, because it does.
+
+## Kestrel Tower Radio
+
+The valley talks back: Kestrel Tower clears the takeoff, calls every ring, warns on low fuel and hot engines, and welcomes the pilot home — or calls into the quiet after a crash. The last three exchanges stay on screen, bottom-left.
 
 ## Run it
 

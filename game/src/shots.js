@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import { STEP, RINGS, WORLD } from './config.js';
 import { EVENT_CRASHED, EVENT_LANDED, EVENT_RING } from './physics.js';
 import { DROP_ZONES, RESCUE_PAD } from './missions.js';
+import { RECON_TARGETS } from './recon.js';
 import { groundHeight } from './terrain.js';
 import { approachGatePosition } from './precision.js';
 
@@ -46,10 +47,19 @@ function autopilot(state, target, landing) {
     desiredPitch = clamp(dy * 0.012, -0.25, 0.3);
   }
   const targetSpeed = landing ? 42 : 62;
+  let throttleDelta = clamp((targetSpeed - state.speed) * 0.06, -1.4, 1.4);
+  // Heat discipline: a real pilot backs off before the engine cooks, and
+  // the autopilot does the same — otherwise a long staged flight would
+  // overheat, lose power and stall into the valley. Above 85 the power
+  // comes off hard; above 70 it simply stops adding power.
+  if (state.heat) {
+    if (state.heat.level > 85) throttleDelta = -1.4;
+    else if (state.heat.level > 70) throttleDelta = Math.min(throttleDelta, 0);
+  }
   return {
     pitch: clamp((desiredPitch - state.pitch) * 2.5, -1, 1),
     roll: clamp((desiredBank - state.bank) * 2.5, -1, 1),
-    throttleDelta: clamp((targetSpeed - state.speed) * 0.06, -1.4, 1.4),
+    throttleDelta,
     airbrake: landing && state.speed > 48,
     drop: false,
     _dist: dist,
@@ -93,6 +103,13 @@ function playTarget(game, latch = { climbedOut: false }) {
   }
   if (state.mission === 'rescue' && !state.rescued) {
     return new THREE.Vector3(RESCUE_PAD.position.x, groundHeight(RESCUE_PAD.position.x, RESCUE_PAD.position.z) + 60, RESCUE_PAD.position.z);
+  }
+  if (state.mission === 'recon') {
+    // Fly to the next unphotographed landmark, at photo altitude, so
+    // the beacon and the landmark read in the frame.
+    const targets = game.state.recon?.targets ?? RECON_TARGETS;
+    const next = targets.find((t) => !t.photographed) ?? targets[0];
+    return new THREE.Vector3(next.x, groundHeight(next.x, next.z) + 70, next.z);
   }
   return game.rings.rings[Math.min(state.ringsPassed, RINGS.count - 1)].position;
 }

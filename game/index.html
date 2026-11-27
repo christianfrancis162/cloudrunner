@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cloudrunner — Kestrel Valley flight game: 7 missions, weather, hangar, time of day, fuel &amp; damage</title>
+<title>Cloudrunner — Kestrel Valley flight game: 8 missions, weather, hangar, time of day, fuel, heat &amp; damage</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #f7c489; font-family: "Segoe UI", system-ui, sans-serif; }
   #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
@@ -56,6 +56,13 @@
   .gauge-fill.fuel.low { background: linear-gradient(90deg, #ff3b30, #ff7a5c); }
   .gauge-fill.damage { background: linear-gradient(90deg, #ff7a5c, #ff3b30); }
   .gauge-fill.damage.high { animation: dmgpulse 0.7s ease-in-out infinite; }
+  .gauge-fill.heat { background: linear-gradient(90deg, #ffb02e, #ff8a3d); }
+  .gauge-fill.heat.hot { background: linear-gradient(90deg, #ff7a3d, #ff3b30); }
+  .gauge-fill.heat.overheat { background: linear-gradient(90deg, #ff3b30, #c81e1e); animation: dmgpulse 0.5s ease-in-out infinite; }
+  /* --- Radio panel: Kestrel Tower transcript, bottom-left --- */
+  .radio-panel { position: absolute; left: 14px; bottom: 14px; width: 360px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; line-height: 1.35; }
+  .radio-line { background: rgba(10, 18, 28, 0.72); border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 6px; padding: 5px 8px; color: #d7ecf7; }
+  .radio-line b { color: #ffc21a; letter-spacing: 1px; margin-right: 4px; }
   @keyframes dmgpulse { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.8); } }
   .hud-horizon { position: relative; width: 190px; height: 110px; border-radius: 8px; overflow: hidden;
     border: 1px solid rgba(255, 255, 255, 0.25); background: #2b6cb0; }

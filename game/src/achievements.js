@@ -120,6 +120,27 @@ export const ACHIEVEMENTS = [
     when: 'end',
     check: (c) => c.medalEarned === 3,
   },
+  {
+    id: 'shutterbug',
+    name: 'Shutterbug',
+    text: 'Photographed all four valley landmarks in one Photo Recon.',
+    when: 'photo',
+    check: (c) => (c.photosTaken ?? 0) >= 4,
+  },
+  {
+    id: 'cool-head',
+    name: 'Cool Head',
+    text: 'Landed with the engine never past 70 heat — throttle discipline.',
+    when: 'end',
+    check: (c) => c.landed && (c.heatMax ?? 99) <= 70,
+  },
+  {
+    id: 'hot-rod',
+    name: 'Hot Rod',
+    text: 'Overheated the engine and still brought her home.',
+    when: 'end',
+    check: (c) => c.landed && c.overheated === true,
+  },
 ];
 
 export function loadAchievements() {
@@ -207,5 +228,10 @@ export function achievementContext(state, extra = {}) {
     lastDropPoints: state.lastDrop ? state.lastDrop.points : 0,
     landingGrade: state.landingGrade ?? null,
     ...extra,
+    // v5 systems, passed in as `extra` by main.js at the end of a sortie
+    // (and live for the photo check): engine heat and recon pictures.
+    heatMax: extra.heatMax ?? null,
+    overheated: extra.overheated ?? false,
+    photosTaken: extra.photosTaken ?? 0,
   };
 }

@@ -24,6 +24,7 @@ export const EVENT_DROP = 1 << 5;
 export const EVENT_PICKUP = 1 << 6;
 export const EVENT_DAMAGE = 1 << 7;
 export const EVENT_GATE = 1 << 8;
+export const EVENT_PHOTO = 1 << 9; // a recon photograph is taken (set by main.js, not the flight model)
 
 // Fresh flight state: parked at the south end of the runway, facing north.
 // The plane matters: the Kestrel is nimble and thirsty, the Albatross

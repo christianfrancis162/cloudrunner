@@ -12,6 +12,8 @@ import { loadCampaign, campaignLine, campaignRows } from './campaign.js';
 import { achievementSummary } from './achievements.js';
 import { DAYLIGHT_ORDER, daylightCard } from './daylight.js';
 import { papiWords } from './papi.js';
+import { heatWords } from './heat.js';
+import { nextReconTarget } from './recon.js';
 
 const COMPASS_POINTS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 
@@ -46,6 +48,11 @@ export function createHud(root) {
         <div class="gauge-track"><div class="gauge-fill damage" id="hud-damage-fill"></div></div>
         <b id="hud-damage-pct">0%</b>
       </div>
+      <div class="hud-gauge" id="hud-heat-gauge">
+        <label>ENGINE HEAT</label>
+        <div class="gauge-track"><div class="gauge-fill heat" id="hud-heat-fill"></div></div>
+        <b id="hud-heat-pct">0%</b>
+      </div>
       <div class="hud-horizon" id="hud-horizon">
         <div class="horizon-inner">
           <div class="horizon-sky"></div>
@@ -70,7 +77,7 @@ export function createHud(root) {
       then land back on the runway for the touchdown bonus. Rings refuel you — an empty
       tank means a glide home. Hard hits damage the airframe.</p>
       <div class="mission-picker" id="mission-picker"></div>
-      <p class="mission-keys">Press <b>1–7</b> or click to pick a sortie</p>
+      <p class="mission-keys">Press <b>1–8</b> or click to pick a sortie</p>
       <div class="plane-picker" id="plane-picker"></div>
       <p class="mission-keys" id="plane-desc">Kestrel K-2 — nimble stunt plane, 85 fuel</p>
       <div class="daylight-picker" id="daylight-picker"></div>
@@ -127,6 +134,8 @@ export function createHud(root) {
     fuelPct: el('hud-fuel-pct'),
     damageFill: el('hud-damage-fill'),
     damagePct: el('hud-damage-pct'),
+    heatFill: el('hud-heat-fill'),
+    heatPct: el('hud-heat-pct'),
     horizon: el('hud-horizon'),
     arrow: el('hud-arrow'),
     banner: el('hud-banner'),
@@ -337,11 +346,23 @@ export function createHud(root) {
     refs.damageFill.style.width = `${Math.round(state.damage)}%`;
     refs.damagePct.textContent = `${Math.round(state.damage)}%`;
     refs.damageFill.classList.toggle('high', state.damage >= 60);
+    // Engine heat: the needle the pilot flies by — full throttle cooks
+    // it, backing off cools it, and overheat is a red gauge and a word.
+    const heatLevel = state.heat ? state.heat.level : 0;
+    const heatOver = state.heat ? state.heat.overheat : false;
+    refs.heatFill.style.width = `${Math.round(heatLevel)}%`;
+    refs.heatPct.textContent = heatWords(heatLevel, heatOver);
+    refs.heatFill.classList.toggle('hot', heatLevel >= 85 && !heatOver);
+    refs.heatFill.classList.toggle('overheat', heatOver);
     // Mission box: name plus live progress for this sortie.
     const mission = missionById(state.mission);
     refs.missionName.textContent = mission.short;
     let progress = '';
     if (state.mission === 'cargo') progress = `${state.cratesDropped}/3 CRATES`;
+    else if (state.mission === 'recon') {
+      const next = state.recon ? nextReconTarget(state.recon) : null;
+      progress = state.recon && state.recon.done ? 'ALL 4 SHOT' : next ? `${state.recon.photos.length}/4 PHOTOS — ${next.name.toUpperCase()}` : '0/4 PHOTOS';
+    }
     else if (state.mission === 'rescue') progress = state.rescued ? 'HIKER ABOARD' : state.onPad ? 'BOARDING…' : 'TO HUT PAD';
     else if (state.mission === 'sprint') {
       const left = Math.max(0, MISSION_TUNING.sprintPar - state.time);

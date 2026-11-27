@@ -99,9 +99,18 @@ export const MISSIONS = {
     crates: 0,
     daylight: 'night',
   },
+  recon: {
+    id: 'recon',
+    name: 'Photo Recon',
+    short: 'PHOTO RECON',
+    tagline: 'Photograph all four valley landmarks — Kestrel Field, Lake Solenne, Kestrel Hut and the river bridge. Press C to shoot, inside the frame and level.',
+    objective: 'Photograph all 4 landmarks (C to shoot), then land.',
+    parTime: null,
+    crates: 0,
+  },
 };
 
-export const MISSION_ORDER = ['school', 'ring-run', 'cargo', 'rescue', 'sprint', 'storm', 'precision'];
+export const MISSION_ORDER = ['school', 'ring-run', 'cargo', 'rescue', 'sprint', 'storm', 'precision', 'recon'];
 
 export function missionById(id) {
   return MISSIONS[id] ?? MISSIONS['ring-run'];

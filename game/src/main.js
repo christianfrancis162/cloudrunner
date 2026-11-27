@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { STEP, PLANE, RINGS, pickSeed } from './config.js';
 import { createTerrain, updateClouds, groundHeight, RUNWAY } from './terrain.js';
 import { createAircraft, poseAircraft } from './aircraft.js';
-import { createFlightState, stepFlight, forwardVector, EVENT_RING, EVENT_LANDED, EVENT_CRASHED, EVENT_TAKEOFF, EVENT_LOW_FUEL, EVENT_DROP, EVENT_PICKUP, EVENT_DAMAGE, EVENT_GATE } from './physics.js';
+import { createFlightState, stepFlight, forwardVector, EVENT_RING, EVENT_LANDED, EVENT_CRASHED, EVENT_TAKEOFF, EVENT_LOW_FUEL, EVENT_DROP, EVENT_PICKUP, EVENT_DAMAGE, EVENT_GATE, EVENT_PHOTO } from './physics.js';
 import { createInput, ACTION_CONFIRM, ACTION_PAUSE, ACTION_RESTART, ACTION_MUTE, ACTION_DROP } from './input.js';
 import { createHud } from './hud.js';
 import { createAudio } from './audio.js';
@@ -30,6 +30,9 @@ import {
 } from './weather.js';
 import { recordFlight, loadLog, clearLog, logSummary, recentFlights } from './log.js';
 import { planeById } from './planes.js';
+import { createHeat, stepHeat, HEAT_EVENT_WARN, HEAT_EVENT_OVERHEAT, HEAT_EVENT_RECOVERED } from './heat.js';
+import { createReconState, tryPhoto, stepRecon, createReconMarkers, updateReconMarkers, nextReconTarget, reconTargetInfo } from './recon.js';
+import { createRadio, radioSay, radioTick, createRadioPanel, updateRadioPanel } from './radio.js';
 
 const BEST_KEY = 'cloudrunner-best';
 const MAX_FRAME = 0.25;
@@ -173,6 +176,18 @@ let best = readBest();
 hud.setBest(best);
 hud.setMission(selectedMission);
 
+// v5 systems: engine heat, the Photo Recon targets, and the tower radio.
+// Heat and recon ride on the flight state so the HUD reads them straight
+// off it; the radio keeps its own log and paints its own panel.
+let heat = createHeat();
+let recon = createReconState();
+let radio = createRadio();
+state.heat = heat;
+state.recon = recon;
+const reconMarkers = createReconMarkers();
+scene.add(reconMarkers.group);
+const radioPanel = createRadioPanel(hudRoot);
+
 // Dropped supply crates, left where they landed so the pilot can see them.
 const crateGeo = new THREE.BoxGeometry(2.2, 2.2, 2.2);
 const crateMat = new THREE.MeshLambertMaterial({ color: 0xc98a3a });
@@ -224,6 +239,8 @@ function overData(extra = {}) {
     if (state.mission === 'storm') reason += ' Flown through the storm — gusts, rain and all.';
     if (state.mission === 'precision' && state.landingGrade) reason += ` ${gradeWords(state.landingGrade)}`;
     if (state.mission === 'school') reason += ` ${schoolResultLine(tutorial, true)}`;
+    if (state.mission === 'recon') reason += recon.done ? ` All four landmarks photographed — the valley, on film.` : ` ${recon.photos.length} of 4 landmarks photographed.`;
+    if (heat.max >= 85) reason += ` Engine peaked at ${Math.round(heat.max)} heat${heat.overheatedEver ? ' — it overheated and you still brought her home.' : '.'}`;
     if (extra.tour && extra.tour.improved) reason += ` Valley Tour: new ${MEDAL_NAMES[extra.tour.earned]} medal for ${mission.name}.`;
     if (extra.newly && extra.newly.length) reason += ` Achievements: ${extra.newly.map((a) => a.name).join(', ')}.`;
     if (state.damage >= 60) reason += ' The airframe needs work after that one.';
@@ -269,7 +286,41 @@ function noteFlightEvent(events) {
   if (events & EVENT_RING) newly.push(...checkAchievements('ring', achievementContext(state)));
   if (events & EVENT_DROP) newly.push(...checkAchievements('drop', achievementContext(state)));
   if (events & EVENT_PICKUP) newly.push(...checkAchievements('pickup', achievementContext(state)));
+  if (events & EVENT_PHOTO) newly.push(...checkAchievements('photo', achievementContext(state, { photosTaken: recon.photos.length })));
   for (const a of newly) hud.toastAchievement(a);
+}
+
+// v5 per-tick systems, shared by the live loop and the screenshot
+// stager's facade step: engine heat (with its throttle clamp and
+// overheat damage), the recon camera (C shoots in Photo Recon), and
+// the tower radio (which speaks for the events of this tick). Returns
+// the events bitmask with EVENT_PHOTO added when a picture lands, and
+// the heat flags for the caller's banners.
+function stepV5Systems(events, ctl, dt) {
+  const heatResult = stepHeat(heat, state, dt);
+  if (heatResult.damage > 0) {
+    state.damage = Math.min(100, state.damage + heatResult.damage);
+  }
+  if (heat.overheat) {
+    // Power out: the throttle cannot stay up while the engine cooks.
+    state.throttle = Math.min(state.throttle, 0.35);
+  }
+  stepRecon(recon, dt);
+  let photo = null;
+  if (ctl.drop && state.mission === 'recon' && state.airborne && !state.landed && !state.crashed) {
+    photo = tryPhoto(recon, state);
+    if (photo) {
+      state.score += photo.points;
+      events |= EVENT_PHOTO;
+    }
+  }
+  radioTick(radio, events, {
+    heatWarn: (heatResult.events & HEAT_EVENT_WARN) !== 0,
+    overheat: (heatResult.events & HEAT_EVENT_OVERHEAT) !== 0,
+    recovered: (heatResult.events & HEAT_EVENT_RECOVERED) !== 0,
+    photo: photo !== null,
+  });
+  return { events, heatEvents: heatResult.events, photo };
 }
 
 // --- Camera ----------------------------------------------------------------
@@ -334,6 +385,11 @@ function renderFrame(dt) {
   updateLandingLight(landingLight, state, isNight(daylightId));
   if (gateMesh.visible) gateMat.opacity = 0.7 + 0.25 * Math.sin(state.time * 5);
   ringsMod.update(state.ringsPassed, state.time);
+  // v5 dressing: the gold recon beacons only show in Photo Recon, and
+  // the next one pulses; the radio panel paints the last three calls.
+  reconMarkers.group.visible = state.mission === 'recon';
+  if (reconMarkers.group.visible) updateReconMarkers(reconMarkers, recon, state.time);
+  updateRadioPanel(radioPanel, radio);
   poseAircraft(aircraft, state, dt);
   updateCamera(dt);
   hud.update(state, ringInfo(), dt, ringsMod.rings);
@@ -347,6 +403,14 @@ function resetWorld(mission = selectedMission) {
   weather = createWeather(seed, mission);
   applyWeatherVisuals();
   tutorial = createTutorial();
+  // v5 systems reset with the sortie: a cool engine, four fresh
+  // landmarks to photograph, and a quiet radio.
+  heat = createHeat();
+  recon = createReconState();
+  radio = createRadio();
+  state.heat = heat;
+  state.recon = recon;
+  updateReconMarkers(reconMarkers, recon, 0);
   ringsMod.rings.forEach((ring) => { ring.passed = false; });
   clearCrates();
   camTarget.set(0, 12, 200);
@@ -358,6 +422,7 @@ function startGame() {
   screen = 'playing';
   hud.showScreen('playing');
   audio.resume();
+  radioSay(radio, 'KESTREL TOWER', `Kestrel-7, ${missionById(state.mission).name} — wind ${windKnots(weather)} knots. Have a good one.`);
   announce(`Flying ${missionById(state.mission).name} over ${SETTING.valley}.`);
 }
 
@@ -383,7 +448,16 @@ function endGame() {
   // count and the medal just earned.
   const tour = recordCampaignResult(state.mission, state.score, state.landed);
   const logFlights = loadLog().length;
-  const newly = checkAchievements('end', achievementContext(state, { logFlights, medalEarned: tour.earned }));
+  // v5 facts for the end checks: how hot the engine got, whether it
+  // overheated, and how many landmarks were photographed.
+  const endExtra = {
+    logFlights,
+    medalEarned: tour.earned,
+    heatMax: Math.round(heat.max),
+    overheated: heat.overheatedEver,
+    photosTaken: recon.photos.length,
+  };
+  const newly = checkAchievements('end', achievementContext(state, endExtra));
   for (const a of newly) hud.toastAchievement(a);
   hud.showScreen('over', overData({ tour, newly }));
   hud.setBest(best);
@@ -402,7 +476,9 @@ const game = {
   },
   step(ctl, dt) {
     updateWeather(weather, dt);
-    const events = stepFlight(state, ctl, { rings: ringsMod.rings, mission: state.mission, wind: windVector(weather) }, dt);
+    let events = stepFlight(state, ctl, { rings: ringsMod.rings, mission: state.mission, wind: windVector(weather) }, dt);
+    const v5 = stepV5Systems(events, ctl, dt);
+    events = v5.events;
     noteFlightEvent(events);
     if (events & EVENT_RING) {
       hud.showBanner(`RING ${state.ringsPassed}! +${RINGS.points}`, 'ring');
@@ -424,6 +500,15 @@ const game = {
     }
     if (events & EVENT_DAMAGE) {
       hud.showBanner(`AIRFRAME DAMAGE ${Math.round(state.damage)}% — FLY GENTLY`, 'warn');
+    }
+    if (v5.photo) {
+      hud.showBanner(`${v5.photo.quality} — ${v5.photo.name} +${v5.photo.points}`, 'ring');
+      audio.ringChime();
+    }
+    if (v5.heatEvents & HEAT_EVENT_OVERHEAT) {
+      hud.showBanner('ENGINE OVERHEAT — POWER OUT', 'warn');
+    } else if (v5.heatEvents & HEAT_EVENT_WARN) {
+      hud.showBanner('ENGINE HOT — EASE OFF THE THROTTLE', 'warn');
     }
     if (events & EVENT_LANDED) audio.touchdownThud();
     if (events & EVENT_CRASHED) audio.crashNoise();
@@ -454,6 +539,19 @@ const game = {
     if (state.mission === 'rescue') {
       state.rescued = true;
       state.score += 300;
+    }
+    if (state.mission === 'recon') {
+      // A staged finished recon: all four landmarks photographed, each
+      // a clean shot, so the end screen shows the full set.
+      for (const target of recon.targets) {
+        if (!target.photographed) {
+          target.photographed = true;
+          target.points = 120;
+          recon.photos.push({ name: target.name, points: 120, quality: 'CLEAN SHOT' });
+        }
+      }
+      recon.done = true;
+      state.score += recon.photos.reduce((sum, p) => sum + p.points, 0);
     }
     if (state.mission === 'sprint') {
       state.timeBonus = 150;
@@ -577,8 +675,23 @@ function runGame() {
     const ctl = { ...input.controls(STEP), drop: dropQueued };
     dropQueued = false;
     updateWeather(weather, STEP);
-    const events = stepFlight(state, ctl, { rings: ringsMod.rings, mission: state.mission, wind: windVector(weather) }, STEP);
+    let events = stepFlight(state, ctl, { rings: ringsMod.rings, mission: state.mission, wind: windVector(weather) }, STEP);
+    const v5 = stepV5Systems(events, ctl, STEP);
+    events = v5.events;
     noteFlightEvent(events);
+    if (v5.photo) {
+      hud.showBanner(`${v5.photo.quality} — ${v5.photo.name} +${v5.photo.points}`, 'ring');
+      audio.ringChime();
+      announce(`Photographed ${v5.photo.name}. ${recon.photos.length} of 4.`);
+    }
+    if (v5.heatEvents & HEAT_EVENT_OVERHEAT) {
+      hud.showBanner('ENGINE OVERHEAT — POWER OUT', 'warn');
+      announce('Engine overheated. Power is out — glide her cool.');
+    } else if (v5.heatEvents & HEAT_EVENT_WARN) {
+      hud.showBanner('ENGINE HOT — EASE OFF THE THROTTLE', 'warn');
+    } else if (v5.heatEvents & HEAT_EVENT_RECOVERED) {
+      hud.showBanner('ENGINE COOL — POWER BACK', 'info');
+    }
     if (events & EVENT_TAKEOFF) {
       hud.showBanner(`AIRBORNE — ${missionById(state.mission).short}`, 'info');
       announce('Airborne.');
