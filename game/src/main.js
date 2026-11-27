@@ -9,12 +9,13 @@ import * as THREE from 'three';
 import { STEP, PLANE, RINGS, pickSeed } from './config.js';
 import { createTerrain, updateClouds, groundHeight, RUNWAY } from './terrain.js';
 import { createAircraft, poseAircraft } from './aircraft.js';
-import { createFlightState, stepFlight, forwardVector, EVENT_RING, EVENT_LANDED, EVENT_CRASHED, EVENT_TAKEOFF, EVENT_LOW_FUEL } from './physics.js';
-import { createInput, ACTION_CONFIRM, ACTION_PAUSE, ACTION_RESTART, ACTION_MUTE } from './input.js';
+import { createFlightState, stepFlight, forwardVector, EVENT_RING, EVENT_LANDED, EVENT_CRASHED, EVENT_TAKEOFF, EVENT_LOW_FUEL, EVENT_DROP, EVENT_PICKUP, EVENT_DAMAGE } from './physics.js';
+import { createInput, ACTION_CONFIRM, ACTION_PAUSE, ACTION_RESTART, ACTION_MUTE, ACTION_DROP } from './input.js';
 import { createHud } from './hud.js';
 import { createAudio } from './audio.js';
 import { createRings } from './rings.js';
 import { stageShot } from './shots.js';
+import { missionById, MISSION_ORDER, SETTING } from './missions.js';
 
 const BEST_KEY = 'cloudrunner-best';
 const MAX_FRAME = 0.25;
@@ -22,6 +23,8 @@ const MAX_FRAME = 0.25;
 const params = new URLSearchParams(window.location.search);
 const shot = params.get('shot');
 const seed = pickSeed(params.get('seed'));
+const shotMission = missionById(params.get('mission')).id;
+let selectedMission = shot ? shotMission : missionById(params.get('mission')).id;
 
 const canvas = document.getElementById('game');
 const hudRoot = document.getElementById('hud-root');
@@ -88,10 +91,27 @@ camera.position.set(0, 12, 200);
 const hud = createHud(hudRoot);
 const audio = createAudio();
 
-let state = createFlightState();
+let state = createFlightState(selectedMission);
 let screen = 'title';
 let best = readBest();
 hud.setBest(best);
+hud.setMission(selectedMission);
+
+// Dropped supply crates, left where they landed so the pilot can see them.
+const crateGeo = new THREE.BoxGeometry(2.2, 2.2, 2.2);
+const crateMat = new THREE.MeshLambertMaterial({ color: 0xc98a3a });
+const droppedCrates = [];
+function clearCrates() {
+  for (const crate of droppedCrates) scene.remove(crate);
+  droppedCrates.length = 0;
+}
+function addCrate(drop) {
+  const crate = new THREE.Mesh(crateGeo, crateMat);
+  crate.position.set(drop.x, groundHeight(drop.x, drop.z) + 1.2, drop.z);
+  crate.castShadow = true;
+  scene.add(crate);
+  droppedCrates.push(crate);
+}
 
 function readBest() {
   try {
@@ -117,14 +137,24 @@ function formatTime(t) {
 
 function overData() {
   const landed = state.landed;
+  const mission = missionById(state.mission);
+  let reason;
+  if (landed) {
+    reason = state.landedClean ? 'A smooth touchdown on the runway.' : 'Down on the runway — a little rough, but you walked away.';
+    if (state.mission === 'cargo') reason += ` ${state.cratesDropped} of 3 crates dropped.`;
+    if (state.mission === 'rescue') reason += state.rescued ? ' Hiker aboard, safe home.' : ' The hiker is still waiting at the hut.';
+    if (state.mission === 'sprint' && state.timeBonus > 0) reason += ` Beat the par by ${Math.round(state.timeBonus / 5)}s: +${state.timeBonus} time bonus.`;
+    if (state.damage >= 60) reason += ' The airframe needs work after that one.';
+  } else {
+    reason = state.crashReason || 'The sortie is over.';
+  }
   return {
-    title: landed ? 'MISSION COMPLETE' : 'CRASHED',
-    reason: landed
-      ? (state.landedClean ? 'A smooth touchdown on the runway.' : 'Down on the runway — a little rough, but you walked away.')
-      : state.crashReason || 'The sortie is over.',
+    title: landed ? `${mission.short} COMPLETE` : 'CRASHED',
+    reason,
     score: state.score,
     rings: state.ringsPassed,
     time: formatTime(state.time),
+    damage: Math.round(state.damage),
     landing: landed ? `+${RINGS.landingBonus}` : '—',
     best: Math.max(best, state.score),
   };
@@ -186,9 +216,10 @@ function renderFrame(dt) {
 }
 
 // --- Game flow ---------------------------------------------------------------
-function resetWorld() {
-  state = createFlightState();
+function resetWorld(mission = selectedMission) {
+  state = createFlightState(mission);
   ringsMod.rings.forEach((ring) => { ring.passed = false; });
+  clearCrates();
   camTarget.set(0, 12, 200);
   camera.position.copy(camTarget);
 }
@@ -198,7 +229,7 @@ function startGame() {
   screen = 'playing';
   hud.showScreen('playing');
   audio.resume();
-  announce('Flying. Take off, then fly through the rings.');
+  announce(`Flying ${missionById(state.mission).name} over ${SETTING.valley}.`);
 }
 
 function endGame() {
@@ -217,16 +248,29 @@ const game = {
   get state() { return state; },
   get rings() { return ringsMod; },
   hud,
-  reset() {
-    resetWorld();
+  reset(mission) {
+    resetWorld(mission ?? selectedMission);
     screen = 'playing';
     hud.showScreen('playing');
   },
   step(ctl, dt) {
-    const events = stepFlight(state, ctl, ringsMod.rings, dt);
+    const events = stepFlight(state, ctl, { rings: ringsMod.rings, mission: state.mission }, dt);
     if (events & EVENT_RING) {
       hud.showBanner(`RING ${state.ringsPassed}! +${RINGS.points}`, 'ring');
       audio.ringChime();
+    }
+    if (events & EVENT_DROP) {
+      const last = state.dropResults[state.dropResults.length - 1];
+      addCrate(state.lastDrop);
+      hud.showBanner(last.points > 0 ? `CRATE ON TARGET — ${last.zone} +${last.points}` : `CRATE MISSED — ${last.zone}`, last.points > 0 ? 'ring' : 'warn');
+      audio.ringChime();
+    }
+    if (events & EVENT_PICKUP) {
+      hud.showBanner('HIKER ABOARD — FLY HOME', 'ring');
+      audio.ringChime();
+    }
+    if (events & EVENT_DAMAGE) {
+      hud.showBanner(`AIRFRAME DAMAGE ${Math.round(state.damage)}% — FLY GENTLY`, 'warn');
     }
     if (events & EVENT_LANDED) audio.touchdownThud();
     if (events & EVENT_CRASHED) audio.crashNoise();
@@ -244,6 +288,24 @@ const game = {
   forceFinish() {
     state.ringsPassed = RINGS.count;
     ringsMod.rings.forEach((ring) => { ring.passed = true; });
+    if (state.mission === 'cargo') {
+      state.cargo = 0;
+      state.cratesDropped = 3;
+      state.dropResults = [
+        { zone: 'Lakeside Meadow', distance: 9, points: 200 },
+        { zone: 'South Meadow', distance: 18, points: 120 },
+        { zone: 'East Clearing', distance: 8, points: 200 },
+      ];
+      state.score += 520;
+    }
+    if (state.mission === 'rescue') {
+      state.rescued = true;
+      state.score += 300;
+    }
+    if (state.mission === 'sprint') {
+      state.timeBonus = 150;
+      state.score += 150;
+    }
     state.score += RINGS.landingBonus;
     state.landed = true;
     state.landedClean = true;
@@ -259,7 +321,7 @@ const game = {
 
 // --- Shot mode ---------------------------------------------------------------
 function runShot(name) {
-  const sceneInfo = stageShot(name, game);
+  const sceneInfo = stageShot(name, game, shotMission);
   if (sceneInfo.screen === 'over') {
     screen = 'over';
     hud.showScreen('over', sceneInfo.over);
@@ -287,13 +349,21 @@ function runGame() {
   const input = createInput(canvas);
   let accumulator = 0;
   let last = performance.now();
+  let dropQueued = false;
 
   hud.showScreen('title');
   hud.setBest(best);
-  announce('Cloudrunner. Press Enter to fly.');
+  hud.setMission(selectedMission);
+  announce(`Cloudrunner over ${SETTING.valley}. Pick a sortie, press Enter to fly.`);
 
   function handleActions() {
     const actions = input.takeActions();
+    const picked = input.takeMissionSelect();
+    if (picked >= 0 && screen === 'title') {
+      selectedMission = MISSION_ORDER[picked];
+      hud.setMission(selectedMission);
+    }
+    if (actions & ACTION_DROP) dropQueued = true;
     if (actions & ACTION_MUTE) {
       const muted = audio.toggleMute();
       hud.showBanner(muted ? 'SOUND OFF' : 'SOUND ON', '');
@@ -318,15 +388,31 @@ function runGame() {
       state.throttle = 0;
       return;
     }
-    const events = stepFlight(state, input.controls(STEP), ringsMod.rings, STEP);
+    const ctl = { ...input.controls(STEP), drop: dropQueued };
+    dropQueued = false;
+    const events = stepFlight(state, ctl, { rings: ringsMod.rings, mission: state.mission }, STEP);
     if (events & EVENT_TAKEOFF) {
-      hud.showBanner('AIRBORNE — FLY THE RINGS', 'info');
+      hud.showBanner(`AIRBORNE — ${missionById(state.mission).short}`, 'info');
       announce('Airborne.');
     }
     if (events & EVENT_RING) {
       hud.showBanner(`RING ${state.ringsPassed}! +${RINGS.points}`, 'ring');
       audio.ringChime();
       announce(`Ring ${state.ringsPassed} of ${RINGS.count}.`);
+    }
+    if (events & EVENT_DROP) {
+      const lastDrop = state.dropResults[state.dropResults.length - 1];
+      addCrate(state.lastDrop);
+      hud.showBanner(lastDrop.points > 0 ? `CRATE ON TARGET — ${lastDrop.zone} +${lastDrop.points}` : `CRATE MISSED — ${lastDrop.zone}`, lastDrop.points > 0 ? 'ring' : 'warn');
+      audio.ringChime();
+    }
+    if (events & EVENT_PICKUP) {
+      hud.showBanner('HIKER ABOARD — FLY HOME', 'ring');
+      audio.ringChime();
+      announce('Hiker aboard. Fly back to the runway.');
+    }
+    if (events & EVENT_DAMAGE) {
+      hud.showBanner(`AIRFRAME DAMAGE ${Math.round(state.damage)}% — FLY GENTLY`, 'warn');
     }
     if (events & EVENT_LOW_FUEL) {
       hud.showBanner('LOW FUEL — FLY A RING TO REFUEL', 'warn');
@@ -369,6 +455,13 @@ function runGame() {
 
   hudRoot.addEventListener('flyagain', () => {
     if (screen === 'over') startGame();
+  });
+
+  hudRoot.addEventListener('missionpick', (event) => {
+    if (screen === 'title') {
+      selectedMission = missionById(event.detail).id;
+      hud.setMission(selectedMission);
+    }
   });
 
   requestAnimationFrame(frame);

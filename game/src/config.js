@@ -25,6 +25,21 @@ export const PLANE = {
   ringFuelBonus: 12,
   crashSpeed: 14, // vertical speed (m/s) above which a touchdown is a crash
   hardImpact: 6, // vertical speed that starts adding damage
+  // Damage model: a battered airframe flies worse, so damage is a decision,
+  // not just a number. Handling authority and top speed fall as damage
+  // rises; at 100 the airframe gives out.
+  damageHandling: 0.45, // fraction of handling lost at 100 damage
+  damageSpeedLoss: 0.18, // fraction of top speed lost at 100 damage
+  hardTouchdownDamage: 8, // base damage for a hard (but survivable) touchdown
+  grazeDamage: 10, // base damage for scraping terrain without crashing
+};
+
+export const MISSION_TUNING = {
+  sprintPar: 150, // seconds: Timed Sprint par time; each second under pays +5
+  sprintBonusPerSecond: 5,
+  rescuePickupBonus: 300,
+  pickupHoldSeconds: 3, // stopped on the hut pad this long to board the hiker
+  dropCooldown: 1.5, // seconds between crate drops
 };
 
 export const RINGS = {

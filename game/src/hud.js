@@ -1,7 +1,8 @@
 // Cloudrunner — HUD: the lit instruments and banners over the 3D view.
 // One job: turn the flight state into readable DOM, updated every frame.
 import { headingDegrees } from './physics.js';
-import { PLANE } from './config.js';
+import { PLANE, MISSION_TUNING } from './config.js';
+import { missionById, MISSION_ORDER } from './missions.js';
 
 const COMPASS_POINTS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 
@@ -15,7 +16,9 @@ export function createHud(root) {
       <div class="hud-box" id="hud-compass"><label>HEADING</label><b id="hud-hdg">000°</b><span id="hud-cardinal">N</span></div>
       <div class="hud-box" id="hud-ring"><label>RING</label><b id="hud-ringcount">0/8</b><span id="hud-ringdist"></span></div>
       <div class="hud-box" id="hud-score"><label>SCORE</label><b id="hud-points">0</b><span id="hud-time">0:00</span></div>
+      <div class="hud-box hud-mission-box" id="hud-mission"><label>MISSION</label><b id="hud-mission-name">RING RUN</b><span id="hud-mission-progress"></span></div>
     </div>
+    <div class="hud-objective" id="hud-objective"></div>
     <div class="hud-left">
       <div class="hud-gauge" id="hud-throttle-gauge">
         <label>THROTTLE</label>
@@ -46,16 +49,18 @@ export function createHud(root) {
   </div>
   <div id="screen-title" class="screen">
     <h1>CLOUDRUNNER</h1>
-    <p class="tagline">Golden-hour stunt flying through an alpine valley</p>
+    <p class="tagline">Golden-hour stunt flying over Kestrel Valley — Kestrel Field, Lake Solenne &amp; the Kestrel Hut</p>
     <div class="mission">
-      <b>MISSION — RING RUN</b>
-      <p>Take off from the runway, fly through all 8 glowing rings across the valley,
+      <b id="mission-title">MISSION — RING RUN</b>
+      <p id="mission-desc">Take off from the runway, fly through all 8 glowing rings across the valley,
       then land back on the runway for the touchdown bonus. Rings refuel you — an empty
       tank means a glide home. Hard hits damage the airframe.</p>
+      <div class="mission-picker" id="mission-picker"></div>
+      <p class="mission-keys">Press <b>1–4</b> or click to pick a sortie</p>
     </div>
     <div class="controls">
       <div><b>W / S</b> pitch &nbsp; <b>A / D</b> roll &nbsp; <b>Mouse</b> steer</div>
-      <div><b>Shift</b> throttle up &nbsp; <b>Ctrl</b> throttle down &nbsp; <b>Space</b> airbrake</div>
+      <div><b>Shift</b> throttle up &nbsp; <b>Ctrl</b> throttle down &nbsp; <b>Space</b> airbrake &nbsp; <b>C</b> drop cargo</div>
       <div><b>P</b> pause &nbsp; <b>R</b> restart &nbsp; <b>M</b> mute</div>
     </div>
     <p class="press">Press <b>ENTER</b> to fly</p>
@@ -102,7 +107,38 @@ export function createHud(root) {
     overResults: el('over-results'),
     best: el('hud-best'),
     again: el('btn-again'),
+    missionName: el('hud-mission-name'),
+    missionProgress: el('hud-mission-progress'),
+    objective: el('hud-objective'),
+    missionTitle: el('mission-title'),
+    missionDesc: el('mission-desc'),
+    missionPicker: el('mission-picker'),
   };
+
+  // Mission picker on the title screen: one button per sortie.
+  let selectedMission = 'ring-run';
+  for (const id of MISSION_ORDER) {
+    const m = missionById(id);
+    const btn = document.createElement('button');
+    btn.className = 'mission-btn';
+    btn.dataset.mission = id;
+    btn.textContent = `${MISSION_ORDER.indexOf(id) + 1} · ${m.name}`;
+    btn.addEventListener('click', () => {
+      setMission(id);
+      root.dispatchEvent(new CustomEvent('missionpick', { bubbles: true, detail: id }));
+    });
+    refs.missionPicker.appendChild(btn);
+  }
+
+  function setMission(id) {
+    selectedMission = missionById(id).id;
+    refs.missionTitle.textContent = `MISSION — ${missionById(selectedMission).short}`;
+    refs.missionDesc.textContent = missionById(selectedMission).tagline;
+    for (const btn of refs.missionPicker.querySelectorAll('.mission-btn')) {
+      btn.classList.toggle('picked', btn.dataset.mission === selectedMission);
+    }
+  }
+  setMission(selectedMission);
 
   let bannerTimer = 0;
 
@@ -135,6 +171,19 @@ export function createHud(root) {
     refs.fuelFill.classList.toggle('low', state.fuel < 20);
     refs.damageFill.style.width = `${Math.round(state.damage)}%`;
     refs.damagePct.textContent = `${Math.round(state.damage)}%`;
+    refs.damageFill.classList.toggle('high', state.damage >= 60);
+    // Mission box: name plus live progress for this sortie.
+    const mission = missionById(state.mission);
+    refs.missionName.textContent = mission.short;
+    let progress = '';
+    if (state.mission === 'cargo') progress = `${state.cratesDropped}/3 CRATES`;
+    else if (state.mission === 'rescue') progress = state.rescued ? 'HIKER ABOARD' : state.onPad ? 'BOARDING…' : 'TO HUT PAD';
+    else if (state.mission === 'sprint') {
+      const left = Math.max(0, MISSION_TUNING.sprintPar - state.time);
+      progress = `PAR ${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')}`;
+    } else progress = `${state.ringsPassed}/8 RINGS`;
+    refs.missionProgress.textContent = progress;
+    refs.objective.textContent = mission.objective;
     // Artificial horizon: the sky/ground split tilts with bank and shifts with pitch.
     // A left bank (positive bank) tilts the horizon clockwise in the gauge.
     const horizonEl = refs.horizon;
@@ -165,6 +214,7 @@ export function createHud(root) {
         <div><label>SCORE</label><b>${overData.score}</b></div>
         <div><label>RINGS</label><b>${overData.rings}/8</b></div>
         <div><label>TIME</label><b>${overData.time}</b></div>
+        <div><label>DAMAGE</label><b>${overData.damage}%</b></div>
         <div><label>LANDING</label><b>${overData.landing}</b></div>
         <div><label>BEST</label><b>${overData.best}</b></div>`;
     }
@@ -178,5 +228,5 @@ export function createHud(root) {
     refs.again.dispatchEvent(new CustomEvent('flyagain', { bubbles: true }));
   });
 
-  return { update, showBanner, showScreen, setBest, PLANE_FUEL_CAPACITY: PLANE.fuelCapacity };
+  return { update, showBanner, showScreen, setBest, setMission, PLANE_FUEL_CAPACITY: PLANE.fuelCapacity };
 }

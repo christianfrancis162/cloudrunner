@@ -1,8 +1,16 @@
-// Cloudrunner — flight model: arcade physics, fuel, damage, rings, landing.
-// One job: advance the flight state one fixed step and report what happened.
+// Cloudrunner — flight model: arcade physics, fuel, damage, missions,
+// rings, landing. One job: advance the flight state one fixed step and
+// report what happened.
+//
+// DAMAGE MODEL (criterion 2: fuel AND damage turn a sortie into decisions):
+// a hard touchdown, a terrain graze or a rough bounce adds damage; damage
+// degrades handling (slower pitch/roll) and top speed, burns fuel faster,
+// and at 100 the airframe gives out. A smooth pilot keeps a clean plane;
+// a rough one flies a wounded one home — or doesn't make it home at all.
 import * as THREE from 'three';
-import { PLANE, RINGS, WORLD } from './config.js';
+import { PLANE, RINGS, WORLD, MISSION_TUNING } from './config.js';
 import { groundHeight, RUNWAY } from './terrain.js';
+import { DROP_ZONES, RESCUE_PAD, dropScore } from './missions.js';
 
 export const EVENT_NONE = 0;
 export const EVENT_RING = 1 << 0;
@@ -10,10 +18,14 @@ export const EVENT_LANDED = 1 << 1;
 export const EVENT_CRASHED = 1 << 2;
 export const EVENT_TAKEOFF = 1 << 3;
 export const EVENT_LOW_FUEL = 1 << 4;
+export const EVENT_DROP = 1 << 5;
+export const EVENT_PICKUP = 1 << 6;
+export const EVENT_DAMAGE = 1 << 7;
 
 // Fresh flight state: parked at the south end of the runway, facing north.
-export function createFlightState() {
+export function createFlightState(mission = 'ring-run') {
   return {
+    mission,
     position: RUNWAY.start.clone(),
     heading: RUNWAY.heading,
     pitch: 0,
@@ -28,11 +40,22 @@ export function createFlightState() {
     ringsPassed: 0,
     score: 0,
     time: 0,
+    timeBonus: 0,
     crashed: false,
     crashReason: '',
     landed: false,
     landedClean: false,
     lowFuelWarned: false,
+    // Cargo Drop: crates aboard, drops made, and where each crate landed.
+    cargo: mission === 'cargo' ? 3 : 0,
+    cratesDropped: 0,
+    dropResults: [],
+    lastDrop: null,
+    dropCooldown: 0,
+    // Rescue Pickup: the hiker boards only after a 3 s hold on the hut pad.
+    rescued: false,
+    pickupTimer: 0,
+    onPad: false,
   };
 }
 
@@ -45,13 +68,26 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-// Advance the flight state by dt seconds. `ctl` is {pitch, roll, throttleDelta,
-// airbrake} from input. `rings` is the live ring list (for pass detection).
+// How much of the plane's handling survives its damage: 1.0 clean, down
+// to (1 - damageHandling) at 100 damage. Top speed falls the same way.
+export function handlingFactor(damage) {
+  return 1 - (damage / 100) * PLANE.damageHandling;
+}
+
+function addDamage(state, amount, events) {
+  state.damage = Math.min(100, state.damage + amount);
+  return events | EVENT_DAMAGE;
+}
+
+// Advance the flight state by dt seconds. `ctl` is {pitch, roll,
+// throttleDelta, airbrake, drop} from input. `ctx` is {rings, mission}.
 // Returns a bitmask of EVENT_* flags.
-export function stepFlight(state, ctl, rings, dt) {
+export function stepFlight(state, ctl, ctx, dt) {
+  const rings = ctx.rings;
   let events = EVENT_NONE;
   if (state.crashed || state.landed) return events;
   state.time += dt;
+  if (state.dropCooldown > 0) state.dropCooldown -= dt;
 
   // Throttle and engine.
   state.throttle = clamp(state.throttle + ctl.throttleDelta * dt, 0, 1);
@@ -62,26 +98,31 @@ export function stepFlight(state, ctl, rings, dt) {
     state.engineOn = true;
   }
 
-  // Fuel burn scales with throttle; airbrake costs nothing extra.
+  // Fuel burn scales with throttle, and a damaged airframe burns more.
   if (state.engineOn) {
-    state.fuel = Math.max(0, state.fuel - PLANE.fuelBurn * state.throttle * dt);
+    const burn = PLANE.fuelBurn * state.throttle * (1 + state.damage / 150);
+    state.fuel = Math.max(0, state.fuel - burn * dt);
     if (state.fuel < 20 && !state.lowFuelWarned) {
       state.lowFuelWarned = true;
       events |= EVENT_LOW_FUEL;
     }
   }
 
-  // Speed: thrust minus drag, airbrake sheds speed fast.
-  const thrust = state.engineOn ? PLANE.accel * state.throttle : 0;
+  // Speed: thrust minus drag, airbrake sheds speed fast. Damage caps the
+  // top speed, so a battered plane cannot outrun its own fuel gauge.
+  const handling = handlingFactor(state.damage);
+  const topSpeed = PLANE.maxSpeed * (1 - (state.damage / 100) * PLANE.damageSpeedLoss);
+  const thrust = state.engineOn ? PLANE.accel * state.throttle * (0.7 + 0.3 * handling) : 0;
   const drag = PLANE.drag * state.speed * state.speed + (ctl.airbrake ? 22 : 0);
   state.speed = Math.max(0, state.speed + (thrust - drag) * dt);
-  state.speed = Math.min(state.speed, PLANE.maxSpeed);
+  state.speed = Math.min(state.speed, topSpeed);
 
   // Attitude: pitch and bank chase the stick, banked turns yaw the nose.
+  // Damage makes the controls heavy — the stick answers slower.
   const onGround = !state.airborne;
-  const pitchAuthority = onGround ? 0.25 : 1;
+  const pitchAuthority = onGround ? 0.25 : handling;
   state.pitch = clamp(state.pitch + ctl.pitch * PLANE.pitchRate * pitchAuthority * dt, -0.6, 0.6);
-  state.bank = clamp(state.bank + ctl.roll * PLANE.rollRate * dt, -PLANE.maxBank, PLANE.maxBank);
+  state.bank = clamp(state.bank + ctl.roll * PLANE.rollRate * handling * dt, -PLANE.maxBank, PLANE.maxBank);
   // Bank bleeds back toward level when the stick is centred.
   if (Math.abs(ctl.roll) < 0.05) state.bank *= Math.max(0, 1 - 1.4 * dt);
   state.heading += PLANE.yawFromBank * Math.sin(state.bank) * dt * (state.speed / 40 + 0.3);
@@ -98,6 +139,26 @@ export function stepFlight(state, ctl, rings, dt) {
   state.verticalSpeed = vel.y;
   state.position.addScaledVector(vel, dt);
 
+  // Cargo drop: press C over a marked meadow. The crate keeps the plane's
+  // forward motion while it falls, so the pilot leads the target.
+  if (ctl.drop && state.cargo > 0 && state.airborne && state.dropCooldown <= 0) {
+    state.dropCooldown = MISSION_TUNING.dropCooldown;
+    state.cargo -= 1;
+    state.cratesDropped += 1;
+    const land = state.position.clone().addScaledVector(forward, state.speed * 0.8);
+    let bestZone = null;
+    let bestDist = Infinity;
+    for (const zone of DROP_ZONES) {
+      const d = Math.hypot(land.x - zone.position.x, land.z - zone.position.z);
+      if (d < bestDist) { bestDist = d; bestZone = zone; }
+    }
+    const points = dropScore(bestDist, bestZone.radius);
+    state.score += points;
+    state.dropResults.push({ zone: bestZone.name, distance: Math.round(bestDist), points });
+    state.lastDrop = { x: land.x, z: land.z, points };
+    events |= EVENT_DROP;
+  }
+
   const ground = groundHeight(state.position.x, state.position.z);
   const gearHeight = 1.3; // wheels touch when the plane centre is this high
   const heightAboveGround = state.position.y - ground;
@@ -107,31 +168,59 @@ export function stepFlight(state, ctl, rings, dt) {
   if (!state.airborne) {
     if (state.speed > 34 && state.pitch > 0.08) {
       state.airborne = true;
+      state.onPad = false;
       events |= EVENT_TAKEOFF;
     } else if (heightAboveGround > 4) {
       state.airborne = true;
     }
   }
 
-  // Ground contact.
-  if (heightAboveGround <= gearHeight) {
+  // Ground contact. The 0.05 m epsilon matters: after a touchdown the
+  // plane sits at exactly gear height, and floating-point rounding can
+  // leave it a hair above it — without the epsilon it would hover there
+  // forever, never rolling and never boarding the rescue hiker.
+  if (heightAboveGround <= gearHeight + 0.05) {
     state.position.y = ground + gearHeight;
     const onRunway = Math.abs(state.position.x) < WORLD.runwayWidth / 2 + 4
       && Math.abs(state.position.z) < WORLD.runwayLength / 2 + 10;
+    const padDist = Math.hypot(state.position.x - RESCUE_PAD.position.x, state.position.z - RESCUE_PAD.position.z);
+    const onPad = state.mission === 'rescue' && padDist < RESCUE_PAD.radius;
     const vSpeed = -vel.y;
     if (state.airborne) {
       if (onRunway && vSpeed < PLANE.crashSpeed && Math.abs(state.bank) < 0.35 && state.speed < 70) {
-        // Touchdown: a landing that counts. It must be the final approach
-        // after the ring run (or a fuel-out glide) to end the sortie.
+        // Touchdown on the runway: the sortie ends here. A hard one still
+        // counts, but it bends the airframe and costs the clean bonus.
+        if (vSpeed > PLANE.hardImpact) {
+          events = addDamage(state, PLANE.hardTouchdownDamage + vSpeed * 2, events);
+          state.landedClean = false;
+        } else {
+          state.landedClean = vSpeed < 4;
+        }
         state.landed = true;
-        state.landedClean = vSpeed < 4;
         state.score += RINGS.landingBonus;
+        if (state.mission === 'sprint' && state.time < MISSION_TUNING.sprintPar) {
+          state.timeBonus = Math.round((MISSION_TUNING.sprintPar - state.time) * MISSION_TUNING.sprintBonusPerSecond);
+          state.score += state.timeBonus;
+        }
+        if (state.damage >= 100) return crash(state, 'The airframe gave out on touchdown.');
         events |= EVENT_LANDED;
+      } else if (onPad && vSpeed < PLANE.crashSpeed && Math.abs(state.bank) < 0.35 && state.speed < 70) {
+        // Touchdown on the hut pad: not the end — hold still to board.
+        if (vSpeed > PLANE.hardImpact) {
+          events = addDamage(state, PLANE.hardTouchdownDamage + vSpeed, events);
+          if (state.damage >= 100) return crash(state, 'The airframe gave out on the hut pad.');
+        }
+        state.speed *= 0.5;
+        state.pitch = 0;
+        state.bank *= 0.3;
+        state.airborne = false;
+        state.onPad = true;
+        state.pickupTimer = 0;
       } else if (vSpeed > PLANE.hardImpact || Math.abs(state.bank) > 0.6 || state.speed > 80) {
         return crash(state, 'You hit the ground hard.');
       } else {
         // A rough but survivable bounce: add damage and bleed speed.
-        state.damage = Math.min(100, state.damage + 12 + vSpeed * 2);
+        events = addDamage(state, PLANE.grazeDamage + vSpeed * 2, events);
         state.speed *= 0.55;
         state.pitch = 0;
         state.bank *= 0.3;
@@ -139,9 +228,25 @@ export function stepFlight(state, ctl, rings, dt) {
         if (state.damage >= 100) return crash(state, 'The airframe gave out.');
       }
     } else {
-      // Rolling on the ground: keep the nose level and bleed speed slowly.
-      state.pitch = 0;
+      // Rolling on the ground: the nose stays where the stick puts it,
+      // bounded so the plane cannot nose over — this is what lets the
+      // pilot rotate for takeoff (a flat `pitch = 0` here would pin the
+      // nose down and the plane could never leave the runway). Gentle
+      // rolling friction brings the plane to a stop on its own (the
+      // rescue pickup needs a full stop on the hut pad); the airbrake
+      // stops it faster.
+      state.pitch = clamp(state.pitch, -0.05, 0.15);
+      if (state.throttle < 0.1) state.speed = Math.max(0, state.speed - 2.5 * dt);
       if (state.speed < 2 && state.throttle < 0.05) state.speed = 0;
+      // Rescue pickup: stopped on the hut pad, the hiker climbs aboard.
+      if (state.onPad && !state.rescued && state.speed < 2) {
+        state.pickupTimer += dt;
+        if (state.pickupTimer >= MISSION_TUNING.pickupHoldSeconds) {
+          state.rescued = true;
+          state.score += MISSION_TUNING.rescuePickupBonus;
+          events |= EVENT_PICKUP;
+        }
+      }
     }
   }
 
@@ -155,7 +260,8 @@ export function stepFlight(state, ctl, rings, dt) {
     state.pitch = Math.min(state.pitch, 0);
   }
 
-  // Ring passes: within the ring radius of the next ring's centre.
+  // Ring passes: within the ring radius of the next ring's centre. Rings
+  // pay in every mission — the valley course is always there to fly.
   const next = rings[state.ringsPassed];
   if (next && !next.passed) {
     const d = state.position.distanceTo(next.position);

@@ -1,7 +1,13 @@
-// Cloudrunner — terrain: the alpine valley, airfield, river, lake, pines and clouds.
-// One job: build the world geometry and answer "how high is the ground here?".
+// Cloudrunner — terrain: Kestrel Valley, its airfield, river, lake, pines
+// and clouds. One job: build the world geometry and answer "how high is
+// the ground here?".
+// The setting is one named place: Kestrel Valley, a golden-hour alpine
+// valley — Kestrel Field airfield on the valley floor, the Solenne River
+// running down to Lake Solenne, and the Kestrel Hut refuge on the west
+// ridge, where the rescue pickup lands.
 import * as THREE from 'three';
 import { WORLD, createRandom } from './config.js';
+import { DROP_ZONES, RESCUE_PAD } from './missions.js';
 
 // Height of the terrain at world (x, z). Deterministic: pure function of x/z,
 // so physics, the runway and the mesh always agree. Valley floor near the
@@ -79,7 +85,7 @@ export function createTerrain(seed) {
   ground.receiveShadow = true;
   group.add(ground);
 
-  // Lake: a flat blue disc in the river valley, south-east of the airfield.
+  // Lake Solenne: a flat blue disc in the river valley, south-east of the airfield.
   const lake = new THREE.Mesh(
     new THREE.CircleGeometry(150, 40),
     new THREE.MeshLambertMaterial({ color: 0x3f8fd2, transparent: true, opacity: 0.92 }),
@@ -168,6 +174,72 @@ export function createTerrain(seed) {
   hangarRoof.rotation.y = Math.PI / 2;
   hangarRoof.position.set(-52, 14, 60);
   group.add(hangarRoof);
+
+  // Cargo drop zones: orange target rings on the three marked meadows,
+  // each with a windsock flag so the pilot can spot them from the air.
+  const zoneRingGeo = new THREE.RingGeometry(30, 40, 32);
+  const zoneInnerGeo = new THREE.RingGeometry(6, 10, 24);
+  const zoneMat = new THREE.MeshBasicMaterial({ color: 0xff7a1a, side: THREE.DoubleSide });
+  const zoneInnerMat = new THREE.MeshBasicMaterial({ color: 0xffc21a, side: THREE.DoubleSide });
+  const flagMat = new THREE.MeshLambertMaterial({ color: 0xff7a1a });
+  for (const zone of DROP_ZONES) {
+    const gy = groundHeight(zone.position.x, zone.position.z);
+    const ring = new THREE.Mesh(zoneRingGeo, zoneMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(zone.position.x, gy + 0.7, zone.position.z);
+    group.add(ring);
+    const inner = new THREE.Mesh(zoneInnerGeo, zoneInnerMat);
+    inner.rotation.x = -Math.PI / 2;
+    inner.position.set(zone.position.x, gy + 0.8, zone.position.z);
+    group.add(inner);
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 12, 6), poleMat);
+    pole.position.set(zone.position.x + 42, gy + 6, zone.position.z);
+    group.add(pole);
+    const flag = new THREE.Mesh(new THREE.ConeGeometry(1.4, 6, 6), flagMat);
+    flag.rotation.z = -Math.PI / 2;
+    flag.position.set(zone.position.x + 45, gy + 13, zone.position.z);
+    group.add(flag);
+  }
+
+  // Rescue pad beside Kestrel Hut: a green H-marked circle on the west
+  // ridge, and the hut itself — red roof, stone walls — just off the pad.
+  const padY = groundHeight(RESCUE_PAD.position.x, RESCUE_PAD.position.z);
+  const padDisc = new THREE.Mesh(
+    new THREE.CircleGeometry(RESCUE_PAD.radius, 32),
+    new THREE.MeshLambertMaterial({ color: 0x2fbf71, transparent: true, opacity: 0.55 }),
+  );
+  padDisc.rotation.x = -Math.PI / 2;
+  padDisc.position.set(RESCUE_PAD.position.x, padY + 0.7, RESCUE_PAD.position.z);
+  group.add(padDisc);
+  const hMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+  for (const [hx, hz, rot] of [
+    [RESCUE_PAD.position.x - 8, RESCUE_PAD.position.z, 0],
+    [RESCUE_PAD.position.x + 8, RESCUE_PAD.position.z, 0],
+    [RESCUE_PAD.position.x, RESCUE_PAD.position.z, Math.PI / 2],
+  ]) {
+    const bar = new THREE.Mesh(new THREE.PlaneGeometry(16, 3), hMat);
+    bar.rotation.x = -Math.PI / 2;
+    bar.rotation.z = rot;
+    bar.position.set(hx, padY + 0.8, hz);
+    group.add(bar);
+  }
+  const hutX = RESCUE_PAD.position.x + 34;
+  const hutZ = RESCUE_PAD.position.z + 18;
+  const hutY = groundHeight(hutX, hutZ);
+  const hut = new THREE.Mesh(
+    new THREE.BoxGeometry(12, 7, 9),
+    new THREE.MeshLambertMaterial({ color: 0x9a8f80 }),
+  );
+  hut.position.set(hutX, hutY + 3.5, hutZ);
+  group.add(hut);
+  const hutRoof = new THREE.Mesh(
+    new THREE.CylinderGeometry(5.2, 5.2, 12.5, 3, 1),
+    new THREE.MeshLambertMaterial({ color: 0xb8452e, flatShading: true }),
+  );
+  hutRoof.rotation.z = Math.PI / 2;
+  hutRoof.rotation.y = Math.PI / 2;
+  hutRoof.position.set(hutX, hutY + 7, hutZ);
+  group.add(hutRoof);
 
   // Pine trees: cones on cylinders, scattered on the valley floor, kept clear
   // of the runway strip and the lake.

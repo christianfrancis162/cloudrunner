@@ -1,4 +1,8 @@
-// Cloudrunner — a 3D flight game entry for make.fun's best-flight-game-20261126-0057.
+// Cloudrunner v2 — a 3D flight game entry for make.fun's best-flight-game-20261126-0057.
+// Four sorties over Kestrel Valley (Ring Run, Cargo Drop, Rescue Pickup,
+// Timed Sprint), a damage model that degrades handling, and a named
+// setting: Kestrel Field, Lake Solenne, the Kestrel Hut refuge.
+
 // The game is this directory's game/ folder: plain static files a desktop
 // browser loads offline (game/index.html and its ES modules, three.js vendored
 // under game/vendor/, no network request). This program hands it in: it copies
@@ -26,7 +30,8 @@ if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), joi
 // The scorer's own caps (reference/gate.json): only text_max_bytes shapes the bytes; the others refuse an entry the
 // scorer would refuse (more than 4 screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB of game
 // files, in all, or a path under game/ over 1000 bytes: game/ counts beside /output's own 1000-entry cap, its
-// screenshots/ and dossier.json).
+// screenshots/ and dossier.json). v2 adds one source file (src/missions.js) and retakes the screenshots so the
+// play shot shows the Cargo Drop sortie over Lake Solenne.
 writeFileSync(
   join(out, 'dossier.json'),
   buildDossier(out, {

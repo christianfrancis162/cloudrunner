@@ -4,6 +4,7 @@ export const ACTION_CONFIRM = 1 << 0;
 export const ACTION_PAUSE = 1 << 1;
 export const ACTION_RESTART = 1 << 2;
 export const ACTION_MUTE = 1 << 3;
+export const ACTION_DROP = 1 << 4;
 
 const KEYMAP = {
   ArrowUp: 'pitchUp',
@@ -19,15 +20,21 @@ const KEYMAP = {
   ControlLeft: 'throttleDown',
   ControlRight: 'throttleDown',
   Space: 'airbrake',
+  KeyC: 'drop',
   Enter: 'confirm',
   KeyP: 'pause',
   KeyR: 'restart',
   KeyM: 'mute',
+  Digit1: 'mission1',
+  Digit2: 'mission2',
+  Digit3: 'mission3',
+  Digit4: 'mission4',
 };
 
 export function createInput(canvas) {
   const keys = new Set();
   let actions = 0;
+  let missionSelected = -1; // index into MISSION_ORDER, -1 when none picked
   let mouseX = 0; // -1..1 across the window
   let mouseActive = false;
   let mouseSeenAt = 0;
@@ -35,6 +42,14 @@ export function createInput(canvas) {
   function onKeyDown(event) {
     const name = KEYMAP[event.code];
     if (!name) return;
+    if (name === 'drop') {
+      if (!event.repeat) actions |= ACTION_DROP;
+      return;
+    }
+    if (name.startsWith('mission')) {
+      if (!event.repeat) missionSelected = Number(name.slice('mission'.length)) - 1;
+      return;
+    }
     if (name === 'confirm' || name === 'pause' || name === 'restart' || name === 'mute') {
       if (!event.repeat) {
         if (name === 'confirm') actions |= ACTION_CONFIRM;
@@ -69,11 +84,18 @@ export function createInput(canvas) {
   window.addEventListener('mousemove', onMouseMove);
   canvas.addEventListener('mousedown', onMouseDown);
 
-  // Read and clear one-shot actions (Enter / P / R / M / click).
+  // Read and clear one-shot actions (Enter / P / R / M / C / click).
   function takeActions() {
     const taken = actions;
     actions = 0;
     return taken;
+  }
+
+  // Read and clear the last mission picked with keys 1-4 (-1 when none).
+  function takeMissionSelect() {
+    const picked = missionSelected;
+    missionSelected = -1;
+    return picked;
   }
 
   // The held control frame for this tick: pitch/roll in -1..1, throttle
@@ -109,5 +131,5 @@ export function createInput(canvas) {
     canvas.removeEventListener('mousedown', onMouseDown);
   }
 
-  return { takeActions, controls, destroy };
+  return { takeActions, takeMissionSelect, controls, destroy };
 }
